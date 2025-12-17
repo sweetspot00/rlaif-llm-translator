@@ -65,10 +65,11 @@ def fetch_map_image(
     maptype: str = "roadmap",
     scale: int = 1,
     hide_labels: bool = True,
+    crop_attribution_px: int = 40,
 ) -> Tuple[Image.Image, np.ndarray]:
     """
     Download a Google Maps Static API image and return it with the
-    pixel->meter affine matrix.
+    pixel->meter affine matrix. Optionally crop the bottom attribution bar.
     """
     base_url = "https://maps.googleapis.com/maps/api/staticmap"
     params = {
@@ -88,6 +89,13 @@ def fetch_map_image(
         raise RuntimeError(f"Static Maps error {response.status_code}: {response.text}")
 
     image = Image.open(io.BytesIO(response.content))
+    if crop_attribution_px > 0 and image.height > crop_attribution_px:
+        # Remove Google attribution/footer text. Homography remains valid for the
+        # retained pixels because origin/scale are unchanged.
+        new_height = image.height - crop_attribution_px
+        image = image.crop((0, 0, image.width, new_height))
+        height = new_height
+
     homography = build_affine_matrix(center_lat, center_lon, zoom, width, height, scale)
     return image, homography
 
@@ -109,6 +117,7 @@ def download_coordinate_list(
     maptype: str = "roadmap",
     scale: int = 1,
     hide_labels: bool = True,
+    crop_attribution_px: int = 40,
 ) -> List[Dict[str, object]]:
     """
     Fetch a default Google Maps image for each (name, lat, lon) triple,
@@ -130,6 +139,7 @@ def download_coordinate_list(
             maptype=maptype,
             scale=scale,
             hide_labels=hide_labels,
+            crop_attribution_px=crop_attribution_px,
         )
         filename = images_dir / f"{idx:02d}_{_slug(name)}.png"
         image.save(filename)
@@ -169,6 +179,7 @@ if __name__ == "__main__":
             maptype="roadmap",  # Use "satellite" if you need satellite imagery.
             scale=1,
             hide_labels=True,
+            crop_attribution_px=40,
         )
 
         for tile in tiles:

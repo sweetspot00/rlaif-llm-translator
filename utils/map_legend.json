@@ -1,39 +1,60 @@
 {
   "map_legend": [
     {
+      "feature": "Water",
+      "visual_color": "Cyan / Light Blue",
+      "approx_hex_code": "#8FDAEE",
+      "semantic_meaning": "Unwalkable (River / Water body)",
+      "walkable": false
+    },
+    {
       "feature": "Roads",
       "visual_color": "Blue-Gray",
-      "approx_hex_code": "#DFE6E9",
-      "semantic_meaning": "Drivable Surface (Cars/Buses)",
+      "approx_hex_code": "#ABBAC9",
+      "semantic_meaning": "Unwalkable (Drivable surface: cars/buses)",
       "walkable": false
     },
     {
-      "feature": "Buildings",
+      "feature": "Buildings (main)",
       "visual_color": "Pale Yellow / Beige",
-      "approx_hex_code": "#F5F5F5",
-      "semantic_meaning": "Obstacles (Walls/Indoors)",
+      "approx_hex_code": "#FDF9EF",
+      "semantic_meaning": "Unwalkable (Buildings / indoors / obstacles)",
       "walkable": false
     },
     {
-      "feature": "Sidewalks",
-      "visual_color": "White (Solid)",
-      "approx_hex_code": "#FFFFFF",
-      "semantic_meaning": "Walkable (Pedestrian Path)",
+      "feature": "Buildings (secondary / deep-gray blocks)",
+      "visual_color": "Light Gray / Lavender-Gray",
+      "approx_hex_code": "#E7E9ED",
+      "semantic_meaning": "Unwalkable (Buildings / indoor blocks / obstacles)",
+      "walkable": false
+    },
+    {
+      "feature": "Sidewalks / Pedestrian paths",
+      "visual_color": "Off-White",
+      "approx_hex_code": "#F9F9F8",
+      "semantic_meaning": "Walkable (Pedestrian area)",
       "walkable": true
     },
     {
-      "feature": "Plazas",
-      "visual_color": "White (Stippled/Dots)",
+      "feature": "Plazas / Open pedestrian zones (stippled texture)",
+      "visual_color": "White with light dotted texture",
       "approx_hex_code": "#FFFFFF",
-      "semantic_meaning": "Walkable (Pedestrian Zone)",
+      "semantic_meaning": "Walkable (Pedestrian zone; contains faint dot pattern)",
       "walkable": true,
-      "note": "Contains texture patterns"
+      "note": "Texture dots are very light gray; treat both base + dots as walkable."
     },
     {
-      "feature": "Crosswalks",
-      "visual_color": "Gray Stripes",
-      "approx_hex_code": "#DFE6E9",
-      "semantic_meaning": "Walkable (Caution)",
+      "feature": "Crosswalk markings",
+      "visual_color": "Near-White",
+      "approx_hex_code": "#F9F8F8",
+      "semantic_meaning": "Walkable (Pedestrian crossing markings)",
+      "walkable": true
+    },
+    {
+      "feature": "Background / empty canvas (non-road, non-building, non-water)",
+      "visual_color": "Very Light Gray",
+      "approx_hex_code": "#F8F7F7",
+      "semantic_meaning": "Walkable (Default walkable space per your rule)",
       "walkable": true
     }
   ]
