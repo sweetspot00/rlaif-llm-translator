@@ -1,6 +1,7 @@
 import io
 import math
 import os
+import argparse
 from pathlib import Path
 from typing import Dict, Iterable, List, Tuple
 
@@ -160,33 +161,77 @@ def download_coordinate_list(
     return results
 
 
+def read_coordinates_file(path: Path, max_count: int | None = None) -> List[Tuple[str, float, float]]:
+    """
+    Read coordinates from a TXT file with lines formatted:
+        name, lat, lon
+    Lines starting with # or blank lines are ignored.
+    """
+    coords: List[Tuple[str, float, float]] = []
+    with path.open("r", encoding="utf-8") as f:
+        for idx, line in enumerate(f, 1):
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            parts = [p.strip() for p in line.split(",")]
+            if len(parts) < 3:
+                raise ValueError(f"Line {idx} in {path} is malformed: '{line}'")
+            name = ",".join(parts[:-2]).strip() if len(parts) > 3 else parts[0]
+            try:
+                lat = float(parts[-2])
+                lon = float(parts[-1])
+            except ValueError as exc:
+                raise ValueError(f"Line {idx} in {path} has invalid lat/lon: '{line}'") from exc
+            coords.append((name, lat, lon))
+            if max_count is not None and len(coords) >= max_count:
+                break
+    if not coords:
+        raise ValueError(f"No coordinates found in {path}")
+    return coords
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Download Google Maps tiles and homographies for a list of coordinates.")
+    parser.add_argument("--api-key", type=str, default=os.getenv("GOOGLE_MAPS_API_KEY"), help="Google Maps API key.")
+    parser.add_argument("--coords-file", type=Path, required=True, help="TXT file with 'name, lat, lon' per line.")
+    parser.add_argument("--zoom", type=int, default=18, help="Google Maps zoom level.")
+    parser.add_argument("--maptype", type=str, default="roadmap", choices=["roadmap", "satellite", "hybrid", "terrain"])
+    parser.add_argument("--scale", type=int, default=1, choices=[1, 2], help="Static Maps scale (1 or 2).")
+    parser.add_argument("--width", type=int, default=640, help="Image width in pixels.")
+    parser.add_argument("--height", type=int, default=640, help="Image height in pixels (before cropping).")
+    parser.add_argument("--hide-labels", action="store_true", default=True, help="Hide labels for cleaner maps.")
+    parser.add_argument("--show-labels", dest="hide_labels", action="store_false", help="Keep labels.")
+    parser.add_argument("--crop-attribution-px", type=int, default=40, help="Pixels to crop from bottom to remove attribution.")
+    parser.add_argument("--images-dir", type=Path, default=Path("downloads/google_maps/images"))
+    parser.add_argument("--homographies-dir", type=Path, default=Path("downloads/google_maps/homographies"))
+    parser.add_argument(
+        "--max-count",
+        type=int,
+        default=None,
+        help="Only download the first N entries from the coords file (e.g., 10).",
+    )
+    return parser.parse_args()
+
+
 if __name__ == "__main__":
-    # Example usage; set GOOGLE_MAPS_API_KEY or replace the placeholder.
-    api_key = os.getenv("GOOGLE_MAPS_API_KEY", "YOUR_GOOGLE_API_KEY")
-    locations = [
-        ("eth_zurich", 47.3763, 8.5477),
-        ("times_square", 40.758, -73.9855),
-    ]
-    base_out = Path("downloads/google_maps")
+    args = parse_args()
+    if not args.api_key:
+        raise RuntimeError("Provide --api-key or set GOOGLE_MAPS_API_KEY.")
 
-    try:
-        tiles = download_coordinate_list(
-            api_key=api_key,
-            coords=locations,
-            zoom=18,
-            images_dir=base_out / "images",
-            homographies_dir=base_out / "homographies",
-            maptype="roadmap",  # Use "satellite" if you need satellite imagery.
-            scale=1,
-            hide_labels=True,
-            crop_attribution_px=40,
-        )
+    coords = read_coordinates_file(args.coords_file, max_count=args.max_count)
 
-        for tile in tiles:
-            print(f"{tile['name']}: saved to {tile['image_path']}")
-            print("Homography (pixel -> Web Mercator meters):")
-            print(tile["homography"])
-            print()
+    tiles = download_coordinate_list(
+        api_key=args.api_key,
+        coords=coords,
+        zoom=args.zoom,
+        images_dir=args.images_dir,
+        homographies_dir=args.homographies_dir,
+        width=args.width,
+        height=args.height,
+        maptype=args.maptype,
+        scale=args.scale,
+        hide_labels=args.hide_labels,
+        crop_attribution_px=args.crop_attribution_px,
+    )
 
-    except Exception as exc:
-        print(f"Failed to download maps: {exc}")
+    print(f"Downloaded {len(tiles)} tiles to {args.images_dir} and homographies to {args.homographies_dir}")
