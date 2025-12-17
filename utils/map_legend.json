@@ -1,0 +1,40 @@
+{
+  "map_legend": [
+    {
+      "feature": "Roads",
+      "visual_color": "Blue-Gray",
+      "approx_hex_code": "#DFE6E9",
+      "semantic_meaning": "Drivable Surface (Cars/Buses)",
+      "walkable": false
+    },
+    {
+      "feature": "Buildings",
+      "visual_color": "Pale Yellow / Beige",
+      "approx_hex_code": "#F5F5F5",
+      "semantic_meaning": "Obstacles (Walls/Indoors)",
+      "walkable": false
+    },
+    {
+      "feature": "Sidewalks",
+      "visual_color": "White (Solid)",
+      "approx_hex_code": "#FFFFFF",
+      "semantic_meaning": "Walkable (Pedestrian Path)",
+      "walkable": true
+    },
+    {
+      "feature": "Plazas",
+      "visual_color": "White (Stippled/Dots)",
+      "approx_hex_code": "#FFFFFF",
+      "semantic_meaning": "Walkable (Pedestrian Zone)",
+      "walkable": true,
+      "note": "Contains texture patterns"
+    },
+    {
+      "feature": "Crosswalks",
+      "visual_color": "Gray Stripes",
+      "approx_hex_code": "#DFE6E9",
+      "semantic_meaning": "Walkable (Caution)",
+      "walkable": true
+    }
+  ]
+}
