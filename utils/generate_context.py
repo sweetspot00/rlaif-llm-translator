@@ -98,8 +98,9 @@ import json
 import os
 import base64
 import re
+import time
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, Set
 
 import openai
 
@@ -150,6 +151,8 @@ def request_scenarios(
     per_category: int,
     image_b64: str | None,
     model: str = "azure/gpt-5",
+    max_retries: int = 3,
+    retry_wait: float = 5.0,
 ) -> str:
     text_prompt = build_user_prompt(image_name, location_name, per_category, image_b64)
     user_content = [{"type": "text", "text": text_prompt}]
@@ -165,11 +168,22 @@ def request_scenarios(
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": user_content},
     ]
-    resp = client.chat.completions.create(
-        model=model,
-        messages=messages,
-    )
-    return resp.choices[0].message.content or ""
+    last_err: Exception | None = None
+    for attempt in range(1, max_retries + 1):
+        try:
+            resp = client.chat.completions.create(
+                model=model,
+                messages=messages,
+            )
+            return resp.choices[0].message.content or ""
+        except Exception as err:  # noqa: BLE001
+            last_err = err
+            if attempt >= max_retries:
+                break
+            wait = retry_wait * attempt
+            print(f"Request failed (attempt {attempt}/{max_retries}): {err}. Retrying in {wait:.1f}s...")
+            time.sleep(wait)
+    raise last_err or RuntimeError("Unknown error during request")
 
 
 def parse_args() -> argparse.Namespace:
@@ -179,6 +193,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--model", type=str, default="azure/gpt-5", help="Model name to request from the proxy.")
     parser.add_argument("--api-key", type=str, default=os.getenv("OPENAI_API_KEY"), help="API key for the LiteLLM proxy.")
     parser.add_argument("--per-category", type=int, default=100, help="Number of scenarios per category per image.")
+    parser.add_argument("--max-retries", type=int, default=3, help="Max retries per LLM request.")
+    parser.add_argument("--retry-wait", type=float, default=5.0, help="Base seconds to wait between retries (multiplies by attempt).")
     parser.add_argument("--dry-run", action="store_true", help="Print prompts only; do not call the API.")
     parser.add_argument(
         "--test",
@@ -186,6 +202,26 @@ def parse_args() -> argparse.Namespace:
         help="Test mode: limit to 5 images and 5 scenarios per category.",
     )
     return parser.parse_args()
+
+
+def load_processed_images(path: Path) -> Set[str]:
+    """Return a set of image names already present in the JSONL output."""
+    processed: Set[str] = set()
+    if not path.exists():
+        return processed
+    with path.open("r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                obj = json.loads(line)
+                img = obj.get("image")
+                if img:
+                    processed.add(str(img))
+            except json.JSONDecodeError:
+                continue
+    return processed
 
 
 def main() -> None:
@@ -201,6 +237,8 @@ def main() -> None:
     out_path: Path = args.output
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
+    processed_images = load_processed_images(out_path)
+
     per_category = 5 if args.test else args.per_category
     max_images = 5 if args.test else None
 
@@ -212,6 +250,10 @@ def main() -> None:
 
     for image_path in iterator:
         image_name = image_path.name
+        if image_name in processed_images:
+            if tqdm:
+                iterator.set_postfix_str(f"skip {image_name}")
+            continue
         location_name = slug_to_readable(image_path.stem)
         image_b64 = load_image_b64(image_path)
         user_prompt = build_user_prompt(image_name, location_name, per_category, image_b64)
@@ -229,6 +271,8 @@ def main() -> None:
             per_category=per_category,
             image_b64=image_b64,
             model=args.model,
+            max_retries=args.max_retries,
+            retry_wait=args.retry_wait,
         )
 
         with out_path.open("a", encoding="utf-8") as f:

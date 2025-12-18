@@ -8,6 +8,20 @@
       "walkable": false
     },
     {
+      "feature": "Parks",
+      "visual_color": "Tea Green",
+      "approx_hex_code": "#C3ECB2",
+      "semantic_meaning": "Walkable parks (public land)",
+      "walkable": true
+    },
+    {
+      "feature": "Dense Vegetation",
+      "visual_color": "Dark Green",
+      "approx_hex_code": "#A5D6A7",
+      "semantic_meaning": "Unwalkable forest",
+      "walkable": false
+    },
+    {
       "feature": "Roads",
       "visual_color": "Blue-Gray",
       "approx_hex_code": "#ABBAC9",
