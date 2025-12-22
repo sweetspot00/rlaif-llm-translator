@@ -45,6 +45,27 @@ def pixel_to_meter_factory(H: np.ndarray, origin_px: Tuple[float, float]) -> Cal
     return _convert
 
 
+def meter_to_pixel_factory(H: np.ndarray, origin_px: Tuple[float, float]) -> Callable[[np.ndarray], np.ndarray]:
+    """
+    Return a function that maps anchored meter xy -> pixel xy using the same origin convention.
+    The inverse homography is applied after shifting by the origin expressed in meters.
+    """
+    H_inv = np.linalg.inv(H)
+    origin_m = apply_homography(np.array([origin_px], dtype=np.float64), H)[0]
+
+    def _convert(m_points: np.ndarray) -> np.ndarray:
+        pts = np.asarray(m_points, dtype=float)
+        orig_shape = pts.shape
+        pts_flat = pts.reshape(-1, 2)
+        world_m = pts_flat + origin_m
+        homo = np.hstack([world_m, np.ones((world_m.shape[0], 1), dtype=np.float64)])
+        mapped = (H_inv @ homo.T).T
+        px = mapped[:, :2] / mapped[:, 2:3]
+        return px.reshape(orig_shape)
+
+    return _convert
+
+
 def obstacle_mask(image: Image.Image, threshold: int) -> np.ndarray:
     """Return boolean mask where True means obstacle pixel."""
     gray = np.array(image.convert("L"))

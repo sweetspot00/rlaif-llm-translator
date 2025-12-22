@@ -1,0 +1,320 @@
+"""
+LLM-SFM translator + Simulation
+
+1. Load preprocessed data e.g. preprocess/preprocessed_scene/0000_00_Zurich_HB.json
+2. Call llm to generat config file of SFM parameters -> also save to sim/results/configs. Name: <input_scene_id_name>_<timestamp>.toml
+3. Run simulation with generated config file and the preprocessed data
+4. Save simulation results (trajectories) to sim/results/simulations. Name: sim_<input_scene_id_name>_<timestamp>.npz<input_scene_id_name>_<timestamp>
+5. Save simulation result (metrics and plots) to sim/results/metrics. Name: metrics_<input_scene_id_name>_<timestamp>.json/png
+
+Log sim results to wandb.
+Support simple test with single input file.
+
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import time
+from dataclasses import dataclass
+import os
+from pathlib import Path
+from typing import Callable, Optional
+
+import numpy as np
+import openai  
+import litellm  
+import pysocialforce as psf
+import toml
+from evaluation import TrajectoryEvaluator  
+import weave
+import wandb
+
+llm_param_translator_prompt =  """
+You are a structured scene-to-physics translator for pysocialforce simulations. You will receive a natural language description of a real world scenario, 
+and You'll need to think about how to simulate crowd using social force model under the scenario.
+Your task is to generate a valid TOML configuration file containing SFM's parameters that accurately reflects the described scenario.
+Respond ONLY with a JSON object containing:
+{
+    "config_file": "TOML string with the config parameters.",
+    "explanation": "Why you choose these parameters. ", 
+    "n_agents": "Suggested number of agents for the scenario.ONLY GIVE NUMBER",
+    "min_distance": "Suggested minimum distance between agents in meters.ONLY GIVE NUMBER",
+    "desired_speed": "Suggested desired starting speed of agents in m/s. ONLY GIVE NUMBER",
+}
+  
+Ensure TOML validity and no extra commentary.
+Here's an example TOML file for reference:
+
+THE RESOLUTION OF THE SCENE IS 1 METER PER UNIT.
+ 
+title = "Social Force Config File"
+
+[scene]
+enable_group = true
+agent_radius = 0.35
+# the maximum speed doesn't exceed 1.3x initial speed
+max_speed_multiplier = 1.3
+
+[desired_force]
+factor = 1.0
+# The relaxation distance of the goal
+goal_threshold = 0.2
+# How long the relaxation process would take
+relaxation_time = 0.5
+
+
+[social_force]
+factor = 5.1
+# Moussaid-Helbing 2009
+# relative importance of position vs velocity vector
+lambda_importance = 2.0
+# define speed interaction
+gamma = 0.35
+n = 2
+# define angular interaction
+n_prime = 3
+
+[obstacle_force]
+factor = 10.0
+# the standard deviation of obstacle force
+sigma = 0.2
+# threshold to trigger this force
+threshold = 3.0
+
+[group_coherence_force]
+factor = 3.0
+
+[group_repulsive_force]
+factor = 1.0
+# threshold to trigger this force
+threshold = 0.55
+
+[group_gaze_force]
+factor = 4.0
+# fielf of view
+fov_phi = 90.0
+
+[along_wall_force]
+factor = 0.6
+"""
+
+
+def _timestamp() -> int:
+    return int(time.time())
+
+
+def _coerce_float(value: object, *, default: Optional[float] = None) -> Optional[float]:
+    if value is None:
+        return default
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            return default
+        return float(stripped)
+    return default
+
+
+@dataclass
+class SimulationRunner:
+    """Pipeline orchestrator for LLM -> config -> simulation -> metrics."""
+
+    results_root: Path = Path("sim/results")
+    provider: str = "litellm"
+    base_url: str = "https://aikey-gateway.ivia.ch"
+    model: str = "azure/gpt-5"
+    api_key: str = os.getenv("OPENAI_KEY", "")
+    llm_client: Callable[[str], dict] | None = None
+    wandb_project: Optional[str] = None
+    config: dict = None
+    min_distance: Optional[float] = None
+    desired_speed: Optional[float] = None
+
+    def __post_init__(self) -> None:
+        self.config_dir = self.results_root / "configs"
+        self.sim_dir = self.results_root / "simulations"
+        self.metrics_dir = self.results_root / "metrics"
+        for d in (self.config_dir, self.sim_dir, self.metrics_dir):
+            d.mkdir(parents=True, exist_ok=True)
+        self._init_client()
+
+    def _init_client(self) -> None:
+        self.llm_client = openai.OpenAI(
+                api_key=os.environ.get("OPENAI_KEY"),
+                base_url="https://aikey-gateway.ivia.ch",
+            )
+
+    def _chat_completion(self, user_prompt: str) -> str:
+        messages = [
+            {"role": "system", "content": llm_param_translator_prompt},
+            {"role": "user", "content": user_prompt},
+        ]
+        resp = self.llm_client.chat.completions.create(model=self.model, messages=messages)
+        print(resp)
+        return resp.choices[0].message.content or ""
+
+    # ---- LLM -> config ----
+    def generate_config(self, scene: dict, *, model_name: str = "gpt-5") -> Path:
+        """
+        Call the provided LLM client to produce a TOML config.
+
+        The client must return a dict with a "config_file" key containing TOML.
+        """
+        user_prompt = scene.get("scenario") or json.dumps(scene, ensure_ascii=False)
+
+        content = self._chat_completion(user_prompt)
+        try:
+            response = json.loads(content)
+        except Exception as exc:  # noqa: BLE001
+            raise ValueError("LLM response is not valid JSON.") from exc
+        if not isinstance(response, dict):
+            raise ValueError("LLM client must return a dict.")
+        
+        config_text = response.get("config_file") or response.get("config")
+        if not config_text:
+            raise ValueError("LLM response missing 'config_file'.")
+        
+        # make it a dict
+        config_dict = toml.loads(config_text)
+        self.config = config_dict
+        self.min_distance = _coerce_float(response.get("min_distance"))
+        self.desired_speed = _coerce_float(response.get("desired_speed"))
+
+        scene_id = scene.get("scene_id", "scene")
+        out_path = self.config_dir / f"{scene_id}_{model_name}_{_timestamp()}.toml"
+        if not config_text.endswith("\n"):
+            config_text += "\n"
+        out_path.write_text(config_text, encoding="utf-8")
+
+        return out_path
+
+    # ---- simulation ----
+    def _load_obstacles(self, scene: dict) -> np.ndarray:
+        path = scene.get("assets", {}).get("anchored_obstacles")
+        if not path:
+            raise FileNotFoundError("anchored_obstacles path missing in scene assets.")
+        arr = np.load(Path(path))
+        return arr
+
+    def _build_simulator(self, scene: dict, config_path: Path) -> psf.Simulator:
+        initial_state = np.asarray(scene["initial_state"], dtype=float)
+        groups = scene.get("groups") or None
+        obstacles = self._load_obstacles(scene).tolist()
+        return psf.Simulator(
+            state=initial_state,
+            # groups=groups,
+            obstacles=obstacles,
+            config_file=str(config_path),
+        )
+
+    def run_simulation(self, scene: dict, config_path: Path, *, steps: int = 150) -> Path:
+        sim = self._build_simulator(scene, config_path)
+        sim.step(n=steps)
+        states, _ = sim.get_states()
+        scene_id = scene.get("scene_id", "scene")
+        out_path = self.sim_dir / f"sim_{scene_id}_{_timestamp()}.npz"
+        np.savez_compressed(out_path, states=states, scene=scene)
+        return out_path
+
+    # ---- metrics ----
+    def evaluate(self, scene: dict, states_path: Path, model_name: str) -> dict:
+        data = np.load(states_path, allow_pickle=True)
+        states = data["states"]
+        evaluator = TrajectoryEvaluator(
+            collision_distance=_coerce_float(self.min_distance, default=0.35) or 0.35
+        )
+        goals = np.asarray(scene["goals_m"], dtype=float)
+        # pad goals to match agents
+        if goals.shape[0] < states.shape[1]:
+            idx = np.arange(states.shape[1]) % goals.shape[0]
+            goals = goals[idx]
+        metrics = evaluator.evaluate(states[:, :, :2], gt=None, goals=goals)
+
+        scene_id = scene.get("scene_id", "scene")
+        ts = _timestamp()
+        flow_path = self.metrics_dir / f"flow_{scene_id}_{model_name}_{ts}.png"
+        density_path = self.metrics_dir / f"density_{scene_id}_{model_name}_{ts}.png"
+        try:
+            evaluator.draw_flow_heatmap(states[:, :, :2], save_path=str(flow_path))
+            evaluator.draw_density_map(states[:, :, :2], save_path=str(density_path))
+        except Exception as exc:  # noqa: BLE001
+            flow_path = None
+            density_path = None
+            metrics["PlotError"] = str(exc)
+
+        out = {
+            "metrics": metrics,
+            "states_path": str(states_path),
+            "flow_heatmap_path": str(flow_path) if flow_path else None,
+            "density_map_path": str(density_path) if density_path else None,
+        }
+        print(f"Evaluation metrics: {metrics}")
+        out_path = self.metrics_dir / f"metrics_{scene_id}_{model_name}_{ts}.json"
+        # if the value is NaN, convert to string
+        for k, v in out["metrics"].items():
+            if isinstance(v, float) and (v != v):  # NaN check
+                out["metrics"][k] = "NaN"
+        out_path.write_text(json.dumps(out, indent=2), encoding="utf-8")
+        return out
+
+    # ---- wandb ----
+    def log_wandb(self, scene: dict, metrics: dict, config_path: Path, states_path: Path) -> None:
+        run = weave.init("wancni-eth-z-rich/llm-sfm-translator")
+        run.log(metrics.get("metrics", {}))
+        run.log(
+            {
+                "scene_id": scene.get("scene_id"),
+                "scene_index": scene.get("scene_index"),
+                "config_path": str(config_path),
+                "states_path": str(states_path),
+                "flow_heatmap_path": metrics.get("flow_heatmap_path"),
+                "density_map_path": metrics.get("density_map_path"),
+            }
+        )
+
+        flow_path = metrics.get("flow_heatmap_path")
+        density_path = metrics.get("density_map_path")
+        if flow_path:
+            run.log({"plots/flow_heatmap": wandb.Image(flow_path)})
+        if density_path:
+            run.log({"plots/density_map": wandb.Image(density_path)})
+        run.finish()
+
+    # ---- orchestration ----
+    def load_scene(self, path: Path) -> dict:
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+        return data
+
+    def run_scene(self, scene_path: Path, *, steps: int = 150, model_name: str = "gpt-5") -> tuple[Path, Path, dict]:
+        scene = self.load_scene(scene_path)
+        config_path = self.generate_config(scene, model_name=model_name)
+        sim_path = self.run_simulation(scene, config_path, steps=steps)
+        metrics = self.evaluate(scene, sim_path, model_name)
+        self.log_wandb(scene, metrics, config_path, sim_path)
+        return config_path, sim_path, metrics
+
+
+def _parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="LLM -> pysocialforce simulation pipeline.")
+    parser.add_argument("scene", type=Path, help="Path to preprocessed scene JSON.")
+    parser.add_argument("--steps", type=int, default=150, help="Simulation steps.")
+    parser.add_argument("--model-name", default="gpt-5", help="Label to embed in config filename.")
+    parser.add_argument("--wandb-project", default="wancni-eth-z-rich/llm-sfm-translator", help="Optional wandb project to log metrics.")
+    return parser.parse_args()
+
+
+def main() -> None:
+    args = _parse_args()
+    runner = SimulationRunner(wandb_project=args.wandb_project)
+    runner.run_scene(args.scene, steps=args.steps, model_name=args.model_name)
+
+
+if __name__ == "__main__":
+    # main()
+    #test
+    runner = SimulationRunner()
+    runner.run_scene("preprocess/preprocessed_scene/0000_00_Zurich_HB.json", 
+                     steps=100)

@@ -66,6 +66,40 @@ class TrajectoryEvaluator:
     )
     result: Dict[str, float] = field(default_factory=dict, init=False)
 
+    def _hungarian_match(
+        self, pred_final: np.ndarray, gt_final: np.ndarray
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """
+        Match GT agents to predicted agents via Hungarian assignment on final positions.
+
+        Returns:
+            (pred_idx, gt_idx) arrays of equal length K, where K=min(N_pred, N_gt).
+        """
+        cost = _pairwise_distances(pred_final, gt_final)
+        pred_idx, gt_idx = linear_sum_assignment(cost)
+        return pred_idx.astype(int), gt_idx.astype(int)
+
+    def _align_by_hungarian_final(
+        self, pred: np.ndarray, gt: np.ndarray
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """
+        Reorder/trim (pred, gt) so agent dimension is aligned by Hungarian matching.
+
+        Matching is computed on final positions only, producing a consistent mapping
+        across all timesteps.
+
+        Returns:
+            (pred_aligned, gt_aligned, perm) where perm maps pred agent index -> gt agent index.
+            If N_pred != N_gt, arrays are trimmed to K=min(N_pred, N_gt) and perm is length K.
+        """
+        if pred.ndim != 3 or gt.ndim != 3 or pred.shape[2] != 2 or gt.shape[2] != 2:
+            raise ValueError("pred and gt must have shape (T, N, 2).")
+        pred_idx, gt_idx = self._hungarian_match(pred[-1], gt[-1])
+        pred_aligned = pred[:, pred_idx, :]
+        gt_aligned = gt[:, gt_idx, :]
+        perm = gt_idx.copy()
+        return pred_aligned, gt_aligned, perm
+
     # ---- metric implementations ----
     def _metric_ade(self, pred: np.ndarray, gt: np.ndarray, _: dict) -> float:
         return float(np.linalg.norm(pred - gt, axis=-1).mean())
@@ -166,13 +200,21 @@ class TrajectoryEvaluator:
         gt: Optional[np.ndarray] = None,
         goals: Optional[np.ndarray] = None,
         bounds: Optional[Tuple[float, float, float, float]] = None,
+        *,
+        match_agents: bool = False,
     ) -> Dict[str, float]:
         if pred.shape[0] < 2:
             raise ValueError("Need at least two timesteps for evaluation.")
-        if gt is not None and pred.shape != gt.shape:
-            raise ValueError("pred and gt must have the same shape (T, N, 2).")
+        if gt is not None and (pred.ndim != 3 or gt.ndim != 3 or pred.shape[2] != 2 or gt.shape[2] != 2):
+            raise ValueError("pred and gt must have shape (T, N, 2).")
+        if gt is not None and pred.shape[0] != gt.shape[0]:
+            raise ValueError("pred and gt must have the same number of timesteps (T).")
 
-        ctx = {"goals": goals, "bounds": bounds}
+        perm: Optional[np.ndarray] = None
+        if match_agents and gt is not None:
+            pred, gt, perm = self._align_by_hungarian_final(pred, gt)
+
+        ctx = {"goals": goals, "bounds": bounds, "perm": perm}
         out: Dict[str, float] = {}
 
         requires_gt = {

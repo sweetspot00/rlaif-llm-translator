@@ -1,0 +1,37 @@
+title = "Zurich HB Morning Commuter Flow along East Bridge"
+
+[scene]
+enable_group = true
+agent_radius = 0.32
+max_speed_multiplier = 1.25
+
+[desired_force]
+factor = 1.2
+goal_threshold = 0.25
+relaxation_time = 0.4
+
+[social_force]
+factor = 5.8
+lambda_importance = 1.9
+gamma = 0.35
+n = 2
+n_prime = 3
+
+[obstacle_force]
+factor = 11.0
+sigma = 0.25
+threshold = 2.0
+
+[group_coherence_force]
+factor = 2.2
+
+[group_repulsive_force]
+factor = 1.4
+threshold = 0.5
+
+[group_gaze_force]
+factor = 3.2
+fov_phi = 100.0
+
+[along_wall_force]
+factor = 0.8
