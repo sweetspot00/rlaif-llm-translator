@@ -4,9 +4,10 @@ PySocialForce-ready scene data.
 
 Inputs expected per scene:
 - context row with image name, event_center, goal_location, crowd_size.
-- obstacle PNG under downloads/google_maps/obstacles/{scene_id}_obstacle.png.
+- obstacle PNG under downloads/google_maps/simplified_obstacles/{scene_id}_obstacle_simplified_obstacle.png
+  (falls back to {scene_id}_obstacle.png).
 - homography under downloads/google_maps/homographies/{scene_id}.txt.
-- anchored obstacle segments under preprocess/pysocialforce_obstacles_meter/{scene_id}_anchored.npy.
+- anchored obstacle segments are not required; sampling uses the obstacle PNG directly.
 
 Outputs:
 - One JSON file per scene under preprocess/preprocessed_scene containing:
@@ -167,10 +168,9 @@ def _validate_group_coverage(n_agents: int, groups: list[list[int]]) -> int:
 
 @dataclass
 class ScenePreprocessor:
-    context_path: Path = Path("datasets/context.jsonl")
-    obstacles_png_dir: Path = Path("downloads/google_maps/obstacles")
+    context_path: Path = Path("datasets/context_simplified_test.jsonl")
+    obstacles_png_dir: Path = Path("downloads/google_maps/simplified_obstacles")
     homography_dir: Path = Path("downloads/google_maps/homographies")
-    anchored_dir: Path = Path("preprocess/pysocialforce_obstacles_meter")
     output_dir: Path = Path("preprocess/preprocessed_scene")
     desired_speed: float = 1.2
     spawn_std_px: float = 30.0
@@ -178,15 +178,16 @@ class ScenePreprocessor:
     rng: np.random.Generator = field(default_factory=np.random.default_rng)
 
     def _load_assets(self, scene_id: str) -> tuple[np.ndarray, np.ndarray, np.ndarray, Path]:
-        png_path = self.obstacles_png_dir / f"{scene_id}_obstacle.png"
+        png_candidates = [
+            self.obstacles_png_dir / f"{scene_id}_obstacle_simplified_obstacle.png",
+            self.obstacles_png_dir / f"{scene_id}_obstacle.png",
+        ]
+        png_path = next((p for p in png_candidates if p.exists()), None)
         homography_path = self.homography_dir / f"{scene_id}.txt"
-        anchored_path = self.anchored_dir / f"{scene_id}_anchored.npy"
-        if not png_path.exists():
-            raise FileNotFoundError(png_path)
+        if png_path is None:
+            raise FileNotFoundError(f"No obstacle PNG found for {scene_id} (checked: {', '.join(map(str, png_candidates))})")
         if not homography_path.exists():
             raise FileNotFoundError(homography_path)
-        if not anchored_path.exists():
-            raise FileNotFoundError(anchored_path)
 
         img = Image.open(png_path).convert("L")
         mask = (np.array(img, dtype=np.uint8) > 0)  # True = walkable
@@ -196,9 +197,13 @@ class ScenePreprocessor:
         origin_px = (0.0, float(img.height))  # bottom-left anchors to (0,0)
         px_to_m = pixel_to_meter_factory(H, origin_px)
 
-        obstacles = np.load(anchored_path)
-        logger.info("Assets loaded for %s (walkable points: %d, obstacles: %s)", scene_id, len(walkable_points), obstacles.shape)
-        return mask, walkable_points, px_to_m, anchored_path
+        logger.info(
+            "Assets loaded for %s (walkable points: %d, obstacle_png: %s)",
+            scene_id,
+            len(walkable_points),
+            png_path.name,
+        )
+        return mask, walkable_points, px_to_m, png_path
 
     def _convert_px_to_m(self, px_to_m, points_px: np.ndarray) -> np.ndarray:
         points_px = np.asarray(points_px, dtype=float)
@@ -243,7 +248,7 @@ class ScenePreprocessor:
         n_agents = starts_m.shape[0]
         if goals_m.shape[0] < n_agents:
             goal_indices = np.arange(n_agents) % goals_m.shape[0]
-            goals_use = goals_m[goal_indices]
+            goals_use = goals_m[goal_indices] # random assign TODO: add nearest as goal
         else:
             goals_use = goals_m[:n_agents]
         directions = goals_use - starts_m
@@ -255,7 +260,7 @@ class ScenePreprocessor:
 
     def process_scene(self, context: dict, index: int) -> tuple[Path, dict]:
         scene_id = Path(str(context["image"])).stem
-        mask, walkable_points, px_to_m, anchored_path = self._load_assets(scene_id)
+        mask, walkable_points, px_to_m, obstacle_png_path = self._load_assets(scene_id)
 
         event_center_raw = context.get("event_center", (0, 0))
         if isinstance(event_center_raw, str) and "gaussian" in event_center_raw.lower():
@@ -274,9 +279,10 @@ class ScenePreprocessor:
         goals_m = self._convert_px_to_m(px_to_m, goals_px)
 
         n_agents = self._pick_crowd_size(context.get("crowd_size", "10-20"))
-        starts_px = _sample_truncated_gaussian(
-            self.rng, walkable_points, mask, mean_px=event_center_px, std_px=self.spawn_std_px, n=n_agents
-        )
+        replace = len(walkable_points) < n_agents
+        idx = self.rng.choice(len(walkable_points), size=n_agents, replace=replace) # random sample agents by map walkable places
+        # TODO: sample based on event center; agents maybe around the event center
+        starts_px = walkable_points[idx]
         starts_m = self._convert_px_to_m(px_to_m, starts_px)
 
         initial_state = self._initial_state(starts_m, goals_m)
@@ -305,12 +311,11 @@ class ScenePreprocessor:
             "goal_location_raw": context.get("goal_location"),
             "goals_px": goals_px.tolist(),
             "goals_m": goals_m.tolist(),
-            "initial_state": initial_state.tolist(),
+            "initial_state_m": initial_state.tolist(),
             "groups": [list(map(int, g)) for g in groups],
             "assets": {
-                "obstacle_png": str(self.obstacles_png_dir / f"{scene_id}_obstacle.png"),
+                "obstacle_png": str(obstacle_png_path),
                 "homography": str(self.homography_dir / f"{scene_id}.txt"),
-                "anchored_obstacles": str(anchored_path),
             },
         }
 
@@ -334,16 +339,28 @@ class ScenePreprocessor:
                 f.write(json.dumps(rec) + "\n")
         return outputs
 
-    def process_one(self, name: str) -> Optional[Path]:
+    def process_one(self, name: Optional[str] = None, *, context_index: Optional[int] = None) -> Optional[Path]:
         """
-        Preprocess a single scene identified by image filename or stem.
+        Preprocess a single scene identified by image filename/stem or by line number in context.jsonl.
 
         Returns the output path if found, otherwise None.
         """
+        if name is None and context_index is None:
+            raise ValueError("Provide either a scene name or context_index.")
+
         contexts = _load_jsonl(self.context_path)
+
+        if context_index is not None:
+            if context_index < 0 or context_index >= len(contexts):
+                raise IndexError(f"context_index {context_index} out of range (0-{len(contexts)-1})")
+            row = contexts[context_index]
+            path, _ = self.process_scene(row, context_index)
+            return path
+
+        target_stem = Path(name).stem
         for idx, row in enumerate(contexts):
             scene_id = Path(str(row.get("image", ""))).stem
-            if scene_id == Path(name).stem:
+            if scene_id == target_stem:
                 path, _ = self.process_scene(row, idx)
                 return path
         return None
@@ -351,4 +368,6 @@ class ScenePreprocessor:
 # test
 if __name__ == "__main__":
     preprocessor = ScenePreprocessor()
-    preprocessor.process_one("00_Zurich_HB")
+    # Example usages:
+    # preprocessor.process_one("00_Zurich_HB")
+    preprocessor.process_one(context_index=51)

@@ -196,8 +196,14 @@ class SimulationRunner:
         path = scene.get("assets", {}).get("anchored_obstacles")
         if not path:
             raise FileNotFoundError("anchored_obstacles path missing in scene assets.")
-        arr = np.load(Path(path))
-        return arr
+        loaded = np.load(Path(path), allow_pickle=False)
+        if isinstance(loaded, np.lib.npyio.NpzFile):
+            if "obstacles" in loaded.files:
+                return loaded["obstacles"]
+            if loaded.files:
+                return loaded[loaded.files[0]]
+            raise ValueError(f"No arrays found in obstacle npz: {path}")
+        return np.asarray(loaded)
 
     def _build_simulator(self, scene: dict, config_path: Path) -> psf.Simulator:
         initial_state = np.asarray(scene["initial_state"], dtype=float)
@@ -205,7 +211,7 @@ class SimulationRunner:
         obstacles = self._load_obstacles(scene).tolist()
         return psf.Simulator(
             state=initial_state,
-            # groups=groups,
+            groups=groups,
             obstacles=obstacles,
             config_file=str(config_path),
         )
@@ -299,22 +305,76 @@ class SimulationRunner:
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="LLM -> pysocialforce simulation pipeline.")
-    parser.add_argument("scene", type=Path, help="Path to preprocessed scene JSON.")
+    parser.add_argument(
+        "scene",
+        type=Path,
+        nargs="?",
+        help="Path to preprocessed scene JSON. Optional if --context-index is provided.",
+    )
+    parser.add_argument(
+        "--context-index",
+        type=int,
+        help="0-based line number in context.jsonl to select a preprocessed scene (uses filename <idx>_<scene_id>.json).",
+    )
+    parser.add_argument(
+        "--context-path",
+        type=Path,
+        default=Path("datasets/context.jsonl"),
+        help="Path to context.jsonl (used with --context-index).",
+    )
+    parser.add_argument(
+        "--preprocessed-dir",
+        type=Path,
+        default=Path("preprocess/preprocessed_scene"),
+        help="Directory containing preprocessed scene JSON files.",
+    )
     parser.add_argument("--steps", type=int, default=150, help="Simulation steps.")
     parser.add_argument("--model-name", default="gpt-5", help="Label to embed in config filename.")
     parser.add_argument("--wandb-project", default="wancni-eth-z-rich/llm-sfm-translator", help="Optional wandb project to log metrics.")
     return parser.parse_args()
 
 
+def _scene_path_from_context_index(index: int, context_path: Path, preprocessed_dir: Path) -> Path:
+    """
+    Resolve a preprocessed scene path from a context.jsonl line number.
+
+    Files are expected to be named <index:04d>_<scene_id>.json.
+    """
+    if index < 0:
+        raise ValueError("context index must be non-negative")
+    with context_path.open("r", encoding="utf-8") as f:
+        for i, line in enumerate(f):
+            if i == index:
+                record = json.loads(line)
+                scene_id = Path(str(record.get("image", ""))).stem
+                if not scene_id:
+                    raise ValueError(f"Missing image field in context line {index}")
+                path = preprocessed_dir / f"{index:04d}_{scene_id}.json"
+                if not path.exists():
+                    raise FileNotFoundError(f"Preprocessed scene not found: {path}")
+                return path
+    raise IndexError(f"context index {index} out of range for {context_path}")
+
+
 def main() -> None:
     args = _parse_args()
     runner = SimulationRunner(wandb_project=args.wandb_project)
-    runner.run_scene(args.scene, steps=args.steps, model_name=args.model_name)
+    if args.context_index is not None:
+        scene_path = _scene_path_from_context_index(args.context_index, args.context_path, args.preprocessed_dir)
+    elif args.scene is not None:
+        scene_path = args.scene
+    else:
+        raise ValueError("Provide either a scene path or --context-index.")
+    runner.run_scene(scene_path, steps=args.steps, model_name=args.model_name)
 
 
 if __name__ == "__main__":
     # main()
     #test
     runner = SimulationRunner()
-    runner.run_scene("preprocess/preprocessed_scene/0000_00_Zurich_HB.json", 
-                     steps=100)
+    test_scene = _scene_path_from_context_index(
+        index=51,
+        context_path=Path("datasets/context_simplified_test.jsonl"),
+        preprocessed_dir=Path("preprocess/preprocessed_scene"),
+    )
+    runner.run_scene(test_scene, steps=200)
