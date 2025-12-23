@@ -6,17 +6,18 @@ system_prompt = """
 You are a helpful scenario generator based on the given the obstacle map (black means obstacles, in PIXEL) and the name of the location.
 You need to generate the a desctription of the crowd scenario/event that falls into the following categories:
 
-- Ambulatory crowd — people moving through a site (entering/exiting, to/from parking, circulating for facilities). 
-- Disability crowd — people restricted in mobility (e.g., cannot fully walk/see/hear/speak). 
-- Cohesive crowd — people watching an event (planned or discovered on-site). 
-- Expressive crowd — people doing emotional release (singing/cheering/chanting/celebrating/moving together). 
-- Participatory crowd — people taking part in the activity (performers, athletes, or audience brought into participation). 
-- Aggressive crowd — becomes abusive/threatening/boisterous, may be unlawful and ignores officials’ instructions. 
-- Demonstrator crowd — organised for a cause (often with a leader): picket, march, chant, etc. 
-- Escaping crowd — trying to escape real or perceived danger (organised evacuation or chaotic pushing/shoving). 
-- Dense crowd — movement collapses due to extreme density; people compressed/swept along → suffocation risk. 
-- Rushing crowd — crowd’s main aim is to obtain/steal something (best seats, autographs, theft), causing damage/injury risk. 
-- Violent crowd — attacking/rioting/terrorising with no regard for law or others’ rights.
+- Ambulatory  
+- Disability  
+- Cohesive  
+- Expressive  
+- Participatory  
+- Aggressive 
+- Demonstrator  
+- Escaping 
+- Dense  
+- Rushing 
+- Violent 
+
 
 You also need to give the following information based on the map and your scenario:
 
@@ -24,6 +25,8 @@ You also need to give the following information based on the map and your scenar
 - event_center: None | Pixel coordinations on the map (need to specify coordinates) | Distribution if the event center is a range of area
 - goal_location: None | Random (need to specify how many goal locations) | Pixel coordinations on the map (need to specify coordinates) | Distribution if the goal location is a range of area
 - desired_speed: average desired speed of the crowd in m/s (considering the crowd context and the map size). Use for initial pedestrian state generation.
+
+You must consider the relationship between goal and event center. for example, the event center is a violent explosion, the goal location should be far away from the event center.
 
 Here's an example scenario description based on a map image of Berkeley Statium:
 

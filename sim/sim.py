@@ -394,13 +394,13 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    # main()
+    main()
     #test
-    runner = SimulationRunner()
-    test_scene = _scene_path_from_context_index(
-        index=30,
-        context_path=Path("datasets/context_simplified_test.jsonl"),
-        preprocessed_dir=Path("preprocess/preprocessed_scene"),
-    )
-    runner.run_scene(test_scene, 
-                     steps=400) # if giving config_path, it will skip llm generation
+    # runner = SimulationRunner()
+    # test_scene = _scene_path_from_context_index(
+    #     index=30,
+    #     context_path=Path("datasets/context_simplified_test.jsonl"),
+    #     preprocessed_dir=Path("preprocess/preprocessed_scene"),
+    # )
+    # runner.run_scene(test_scene, 
+    #                  steps=400) # if giving config_path, it will skip llm generation

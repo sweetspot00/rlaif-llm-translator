@@ -474,4 +474,5 @@ if __name__ == "__main__":
     preprocessor = ScenePreprocessor()
     # Example usages:
     # preprocessor.process_one("00_Zurich_HB")
-    preprocessor.process_one(context_index=9)
+    # preprocessor.process_one(context_index=9)
+    preprocessor.process_all()
