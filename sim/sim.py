@@ -389,4 +389,4 @@ if __name__ == "__main__":
     )
     runner.run_scene(test_scene, 
                      steps=400,
-                     config_path="sim/results/configs/optimized.toml")
+                     config_path="sim/results/configs/optimized.toml") # if giving config_path, it will skip llm generation
