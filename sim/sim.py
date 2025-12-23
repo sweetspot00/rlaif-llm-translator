@@ -48,7 +48,6 @@ Respond ONLY with a JSON object containing:
     "explanation": "Why you choose these parameters. ", 
     "n_agents": "Suggested number of agents for the scenario.ONLY GIVE NUMBER",
     "min_distance": "Suggested minimum distance between agents in meters.ONLY GIVE NUMBER",
-    "desired_speed": "Suggested desired starting speed of agents in m/s. ONLY GIVE NUMBER",
 }
   
 Ensure TOML validity and no extra commentary.
@@ -56,55 +55,62 @@ Here's an example TOML file for reference:
 
 THE RESOLUTION OF THE SCENE IS 1 METER PER UNIT.
  
-title = "Social Force Config File"
+title = "Social Force Default Config File"
 
 [scene]
 enable_group = true
 agent_radius = 0.35
-# the maximum speed doesn't exceed 1.3x initial speed
+step_width = 1.0
 max_speed_multiplier = 1.3
+tau = 0.5
+resolution = 10
 
-[desired_force]
-factor = 1.0
-# The relaxation distance of the goal
-goal_threshold = 0.2
-# How long the relaxation process would take
-relaxation_time = 0.5
+[goal_attractive_force]
+factor = 1
 
+[ped_repulsive_force]
+factor = 1.5
+v0 = 2.1
+sigma = 0.3
+# fov params
+fov_phi = 100.0
+fov_factor = 0.5 # out of view factor
 
-[social_force]
-factor = 5.1
-# Moussaid-Helbing 2009
-# relative importance of position vs velocity vector
-lambda_importance = 2.0
-# define speed interaction
-gamma = 0.35
-n = 2
-# define angular interaction
-n_prime = 3
-
-[obstacle_force]
-factor = 10.0
-# the standard deviation of obstacle force
-sigma = 0.2
-# threshold to trigger this force
-threshold = 3.0
+[space_repulsive_force]
+factor = 1
+u0 = 10
+r = 0.2
 
 [group_coherence_force]
 factor = 3.0
 
 [group_repulsive_force]
 factor = 1.0
-# threshold to trigger this force
 threshold = 0.55
 
 [group_gaze_force]
 factor = 4.0
-# fielf of view
+# fov params
 fov_phi = 90.0
 
+[desired_force]
+factor = 1.0
+relaxation_time = 0.5
+goal_threshold = 0.2
+
+[social_force]
+factor = 5.1
+lambda_importance = 2.0
+gamma = 0.35
+n = 2
+n_prime = 3
+
+[obstacle_force]
+factor = 10.0
+sigma = 0.2
+threshold = 3.0
+
 [along_wall_force]
-factor = 0.6
 """
 
 
@@ -137,7 +143,7 @@ class SimulationRunner:
     llm_client: Callable[[str], dict] | None = None
     config: dict = None
     min_distance: Optional[float] = None
-    desired_speed: Optional[float] = None
+    step_width: float = 0.4  # seconds per simulation step
 
     def __post_init__(self) -> None:
         self.config_dir = self.results_root / "configs"
@@ -189,7 +195,7 @@ class SimulationRunner:
         config_dict = toml.loads(config_text)
         self.config = config_dict
         self.min_distance = _coerce_float(response.get("min_distance"))
-        self.desired_speed = _coerce_float(response.get("desired_speed"))
+        self.step_width = _coerce_float(self.config.get("scene", {}).get("step_width"), default=0.4)
 
         scene_id = scene.get("scene_id", "scene")
         out_path = self.config_dir / f"{scene_id}_{model_name}_{_timestamp()}.toml"
@@ -256,6 +262,7 @@ class SimulationRunner:
         evaluator = TrajectoryEvaluator(
             collision_distance=_coerce_float(self.config["scene"]["agent_radius"] * 2) or 0.7,
             min_distance=self.min_distance or 0.35,
+            dt = self.step_width,
         )
         goals = np.asarray(scene["goals_m"], dtype=float)
         # pad goals to match agents
@@ -296,9 +303,12 @@ class SimulationRunner:
         data = json.loads(Path(path).read_text(encoding="utf-8"))
         return data
 
-    def run_scene(self, scene_path: Path, *, steps: int = 150, model_name: str = "gpt-5") -> tuple[Path, Path, dict]:
+    def run_scene(self, scene_path: Path, *, config_path: Path, steps: int = 150, model_name: str = "gpt-5") -> tuple[Path, Path, dict]:
         scene = self.load_scene(scene_path)
-        config_path = self.generate_config(scene, model_name=model_name)
+        if not config_path:
+            config_path = self.generate_config(scene, model_name=model_name)
+        else:
+            self.config = toml.load(config_path)
         sim_path = self.run_simulation(scene, config_path, steps=steps)
         metrics = self.evaluate(scene, sim_path, model_name)
         return config_path, sim_path, metrics
@@ -373,8 +383,10 @@ if __name__ == "__main__":
     #test
     runner = SimulationRunner()
     test_scene = _scene_path_from_context_index(
-        index=51,
+        index=30,
         context_path=Path("datasets/context_simplified_test.jsonl"),
         preprocessed_dir=Path("preprocess/preprocessed_scene"),
     )
-    runner.run_scene(test_scene, steps=200)
+    runner.run_scene(test_scene, 
+                     steps=400,
+                     config_path="sim/results/configs/optimized.toml")

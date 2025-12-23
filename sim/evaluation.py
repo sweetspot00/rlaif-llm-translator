@@ -51,7 +51,7 @@ class TrajectoryEvaluator:
     goal_radius: float = 0.5
     goal_tolerance: float = 0.0
     density_bins: int = 20
-    dt: float = 1.0
+    dt: float = 0.1
     metrics: Iterable[str] = field(
         default_factory=lambda: (
             "ADE",
@@ -62,7 +62,7 @@ class TrajectoryEvaluator:
             "VD",
             "DDS",
             "GoalRate",
-            "Hausdorff",
+            # "Hausdorff",
             "SocialDistanceViolations"
         )
     )
@@ -222,7 +222,7 @@ class TrajectoryEvaluator:
         "GoalRate": _metric_goal_rate,
         "VD": _metric_vd,
         "DDS": _metric_dds,
-        "Hausdorff": _metric_hausdorff,
+        # "Hausdorff": _metric_hausdorff,
         "SocialDistanceViolations": _metric_social_distance_violations,
     }
 

@@ -172,22 +172,43 @@ class ScenePreprocessor:
     obstacles_png_dir: Path = Path("downloads/google_maps/simplified_obstacles")
     homography_dir: Path = Path("downloads/google_maps/homographies")
     output_dir: Path = Path("preprocess/preprocessed_scene")
-    desired_speed: float = 1.2
+    # desired_speed: float = 1.2 get from context.jsonl
     spawn_std_px: float = 30.0
     goal_std_px: float = 40.0
     rng: np.random.Generator = field(default_factory=np.random.default_rng)
+    anchored_obstacles_dir: Path = Path("preprocess/pysfm_obstacles_meter_close_shape")
 
     def _load_assets(self, scene_id: str) -> tuple[np.ndarray, np.ndarray, np.ndarray, Path]:
+        # Normalize scene id so we can match both raw names and stripped suffixes.
+        base_id = scene_id
+        for suffix in ["_obstacle_simplified_obstacle", "_obstacle_simplified", "_obstacle"]:
+            if base_id.endswith(suffix):
+                base_id = base_id[: -len(suffix)]
+                break
+
         png_candidates = [
-            self.obstacles_png_dir / f"{scene_id}_obstacle_simplified_obstacle.png",
-            self.obstacles_png_dir / f"{scene_id}_obstacle.png",
+            self.obstacles_png_dir / f"{scene_id}.png",
+            self.obstacles_png_dir / f"{base_id}_obstacle_simplified_obstacle.png",
+            self.obstacles_png_dir / f"{base_id}_obstacle.png",
+            self.obstacles_png_dir / f"{base_id}.png",
         ]
         png_path = next((p for p in png_candidates if p.exists()), None)
-        homography_path = self.homography_dir / f"{scene_id}.txt"
+
+        homography_candidates = [
+            self.homography_dir / f"{scene_id}.txt",
+            self.homography_dir / f"{base_id}_obstacle_simplified.txt",
+            self.homography_dir / f"{base_id}.txt",
+        ]
+        homography_path = next((h for h in homography_candidates if h.exists()), None)
+
         if png_path is None:
-            raise FileNotFoundError(f"No obstacle PNG found for {scene_id} (checked: {', '.join(map(str, png_candidates))})")
-        if not homography_path.exists():
-            raise FileNotFoundError(homography_path)
+            raise FileNotFoundError(
+                f"No obstacle PNG found for {scene_id} (checked: {', '.join(map(str, png_candidates))})"
+            )
+        if homography_path is None:
+            raise FileNotFoundError(
+                f"No homography found for {scene_id} (checked: {', '.join(map(str, homography_candidates))})"
+            )
 
         img = Image.open(png_path).convert("L")
         mask = (np.array(img, dtype=np.uint8) > 0)  # True = walkable
@@ -196,12 +217,15 @@ class ScenePreprocessor:
         H = load_homography(homography_path)
         origin_px = (0.0, float(img.height))  # bottom-left anchors to (0,0)
         px_to_m = pixel_to_meter_factory(H, origin_px)
+        
+        self.anchored_obstacles_dir = Path("preprocess/pysfm_obstacles_meter_close_shape")
 
         logger.info(
-            "Assets loaded for %s (walkable points: %d, obstacle_png: %s)",
+            "Assets loaded for %s (walkable points: %d, obstacle_png: %s, homography: %s)",
             scene_id,
             len(walkable_points),
             png_path.name,
+            homography_path.name,
         )
         return mask, walkable_points, px_to_m, png_path
 
@@ -240,17 +264,41 @@ class ScenePreprocessor:
         # fixed location string not parsed -> fall back to event center
         return np.vstack([_nearest_walkable(mask, walkable_points, event_center_px)] * count)
 
+    def _assign_goals(
+        self,
+        starts_m: np.ndarray,
+        goals_m: np.ndarray,
+        strategy: str = "nearest",
+    ) -> np.ndarray:
+        """
+        Assign each agent a goal using either:
+        - "nearest": pick the closest goal (default)
+        - "random": random assignment (with wrap if fewer goals than agents)
+        """
+        n_agents = starts_m.shape[0]
+        if strategy == "random":
+            idx = np.arange(n_agents) % goals_m.shape[0]
+            self.rng.shuffle(idx)
+            return goals_m[idx]
+
+        # nearest assignment (one-to-one if possible; otherwise reuse nearest)
+        distances = np.linalg.norm(starts_m[:, None, :] - goals_m[None, :, :], axis=2)
+        assigned = np.empty((n_agents, 2), dtype=float)
+        used_goals: set[int] = set()
+        for i in range(n_agents):
+            goal_order = np.argsort(distances[i])
+            chosen = next((g for g in goal_order if g not in used_goals), goal_order[0])
+            used_goals.add(chosen)
+            assigned[i] = goals_m[chosen]
+        return assigned
+
     def _initial_state(
         self,
         starts_m: np.ndarray,
         goals_m: np.ndarray,
+        goal_assignment: str = "nearest",
     ) -> np.ndarray:
-        n_agents = starts_m.shape[0]
-        if goals_m.shape[0] < n_agents:
-            goal_indices = np.arange(n_agents) % goals_m.shape[0]
-            goals_use = goals_m[goal_indices] # random assign TODO: add nearest as goal
-        else:
-            goals_use = goals_m[:n_agents]
+        goals_use = self._assign_goals(starts_m, goals_m, strategy=goal_assignment)
         directions = goals_use - starts_m
         norms = np.linalg.norm(directions, axis=1, keepdims=True)
         with np.errstate(divide="ignore", invalid="ignore"):
@@ -261,7 +309,7 @@ class ScenePreprocessor:
     def process_scene(self, context: dict, index: int) -> tuple[Path, dict]:
         scene_id = Path(str(context["image"])).stem
         mask, walkable_points, px_to_m, obstacle_png_path = self._load_assets(scene_id)
-
+        self.desired_speed = context.get("desired_speed", 1.2)
         event_center_raw = context.get("event_center", (0, 0))
         if isinstance(event_center_raw, str) and "gaussian" in event_center_raw.lower():
             mean_px = walkable_points.mean(axis=0)
@@ -311,11 +359,12 @@ class ScenePreprocessor:
             "goal_location_raw": context.get("goal_location"),
             "goals_px": goals_px.tolist(),
             "goals_m": goals_m.tolist(),
-            "initial_state_m": initial_state.tolist(),
+            "initial_state": initial_state.tolist(),
             "groups": [list(map(int, g)) for g in groups],
             "assets": {
                 "obstacle_png": str(obstacle_png_path),
                 "homography": str(self.homography_dir / f"{scene_id}.txt"),
+                "anchored_obstacles": str(self.anchored_obstacles_dir / f"{scene_id}_anchored.npz"),
             },
         }
 
@@ -370,4 +419,4 @@ if __name__ == "__main__":
     preprocessor = ScenePreprocessor()
     # Example usages:
     # preprocessor.process_one("00_Zurich_HB")
-    preprocessor.process_one(context_index=51)
+    preprocessor.process_one(context_index=30)

@@ -23,6 +23,7 @@ You also need to give the following information based on the map and your scenar
 - crowd_size: 0-100 | 100-500 | 500-1000 | 1000+ (THE MAP SIZE is FIXED (width ≈ 301.7 m, height ≈ 282.8 m)need to consider the size of the map, the event could be large but the map is small, so the crowd size should be small accordingly)
 - event_center: None | Pixel coordinations on the map (need to specify coordinates) | Distribution if the event center is a range of area
 - goal_location: None | Random (need to specify how many goal locations) | Pixel coordinations on the map (need to specify coordinates) | Distribution if the goal location is a range of area
+- desired_speed: average desired speed of the crowd in m/s (considering the crowd context and the map size). Use for initial pedestrian state generation.
 
 Here's an example scenario description based on a map image of Berkeley Statium:
 
@@ -78,6 +79,7 @@ goal_location: {
 ],
 "px_to_m": 0.471400264733
 }
+desired_speed: 0.6
 
 Here's another example scenario description based on a map image of Times Square:
 scenario: "There an explosion occurred at zurich HB train station on Monday morning, causing a panic among the dense crowd of tourists and commuters trying to escape the area."
@@ -85,6 +87,7 @@ category: Violent
 crowd_size: 100-500
 event_center: [200, 300]
 goal_location: Random (3)
+desired_speed: 1.2
 
 Give back the result in a jsonl format, each line is a json object with the following keys:
 
