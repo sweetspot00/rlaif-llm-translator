@@ -7,7 +7,6 @@ LLM-SFM translator + Simulation
 4. Save simulation results (trajectories) to sim/results/simulations. Name: sim_<input_scene_id_name>_<timestamp>.npz<input_scene_id_name>_<timestamp>
 5. Save simulation result (metrics and plots) to sim/results/metrics. Name: metrics_<input_scene_id_name>_<timestamp>.json/png
 
-Log sim results to wandb.
 Support simple test with single input file.
 
 """
@@ -21,15 +20,23 @@ from dataclasses import dataclass
 import os
 from pathlib import Path
 from typing import Callable, Optional
+import logging
 
 import numpy as np
 import openai  
-import litellm  
 import pysocialforce as psf
 import toml
 from evaluation import TrajectoryEvaluator  
-import weave
-import wandb
+
+logger = logging.getLogger(__name__)
+# Reduce noisy debug logging from dependencies.
+logging.getLogger("pysocialforce").setLevel(logging.WARNING)
+logging.getLogger("urllib3").setLevel(logging.WARNING)
+# Default to INFO; attach a basic handler if none exists.
+root_logger = logging.getLogger()
+if not root_logger.hasHandlers():
+    logging.basicConfig(level=logging.INFO, format="[{levelname}] {message}", style="{")
+root_logger.setLevel(logging.INFO)
 
 llm_param_translator_prompt =  """
 You are a structured scene-to-physics translator for pysocialforce simulations. You will receive a natural language description of a real world scenario, 
@@ -128,7 +135,6 @@ class SimulationRunner:
     model: str = "azure/gpt-5"
     api_key: str = os.getenv("OPENAI_KEY", "")
     llm_client: Callable[[str], dict] | None = None
-    wandb_project: Optional[str] = None
     config: dict = None
     min_distance: Optional[float] = None
     desired_speed: Optional[float] = None
@@ -140,12 +146,14 @@ class SimulationRunner:
         for d in (self.config_dir, self.sim_dir, self.metrics_dir):
             d.mkdir(parents=True, exist_ok=True)
         self._init_client()
+        logger.info("SimulationRunner initialized (results_root=%s)", self.results_root)
 
     def _init_client(self) -> None:
         self.llm_client = openai.OpenAI(
                 api_key=os.environ.get("OPENAI_KEY"),
                 base_url="https://aikey-gateway.ivia.ch",
             )
+        logger.info("LLM client initialized (provider=%s, model=%s)", self.provider, self.model)
 
     def _chat_completion(self, user_prompt: str) -> str:
         messages = [
@@ -203,12 +211,20 @@ class SimulationRunner:
             if loaded.files:
                 return loaded[loaded.files[0]]
             raise ValueError(f"No arrays found in obstacle npz: {path}")
-        return np.asarray(loaded)
+        obstacles = np.asarray(loaded)
+        logger.info("Loaded obstacles: %s (shape=%s)", path, obstacles.shape)
+        return obstacles
 
     def _build_simulator(self, scene: dict, config_path: Path) -> psf.Simulator:
         initial_state = np.asarray(scene["initial_state"], dtype=float)
         groups = scene.get("groups") or None
         obstacles = self._load_obstacles(scene).tolist()
+        logger.info(
+            "Building simulator: scene_id=%s, agents=%d, obstacles=%d",
+            scene.get("scene_id", "scene"),
+            initial_state.shape[0],
+            len(obstacles),
+        )
         return psf.Simulator(
             state=initial_state,
             groups=groups,
@@ -218,19 +234,28 @@ class SimulationRunner:
 
     def run_simulation(self, scene: dict, config_path: Path, *, steps: int = 150) -> Path:
         sim = self._build_simulator(scene, config_path)
+        logger.info("Running simulation: scene_id=%s, steps=%d", scene.get("scene_id", "scene"), steps)
         sim.step(n=steps)
         states, _ = sim.get_states()
         scene_id = scene.get("scene_id", "scene")
         out_path = self.sim_dir / f"sim_{scene_id}_{_timestamp()}.npz"
         np.savez_compressed(out_path, states=states, scene=scene)
+        logger.info("Simulation complete: saved states to %s", out_path)
         return out_path
 
     # ---- metrics ----
     def evaluate(self, scene: dict, states_path: Path, model_name: str) -> dict:
         data = np.load(states_path, allow_pickle=True)
         states = data["states"]
+        logger.info(
+            "Evaluating simulation: scene_id=%s, frames=%d, agents=%d",
+            scene.get("scene_id", "scene"),
+            states.shape[0],
+            states.shape[1],
+        )
         evaluator = TrajectoryEvaluator(
-            collision_distance=_coerce_float(self.min_distance, default=0.35) or 0.35
+            collision_distance=_coerce_float(self.config["scene"]["agent_radius"] * 2) or 0.7,
+            min_distance=self.min_distance or 0.35,
         )
         goals = np.asarray(scene["goals_m"], dtype=float)
         # pad goals to match agents
@@ -257,7 +282,7 @@ class SimulationRunner:
             "flow_heatmap_path": str(flow_path) if flow_path else None,
             "density_map_path": str(density_path) if density_path else None,
         }
-        print(f"Evaluation metrics: {metrics}")
+        logger.info("Evaluation metrics: %s", metrics)
         out_path = self.metrics_dir / f"metrics_{scene_id}_{model_name}_{ts}.json"
         # if the value is NaN, convert to string
         for k, v in out["metrics"].items():
@@ -265,30 +290,7 @@ class SimulationRunner:
                 out["metrics"][k] = "NaN"
         out_path.write_text(json.dumps(out, indent=2), encoding="utf-8")
         return out
-
-    # ---- wandb ----
-    def log_wandb(self, scene: dict, metrics: dict, config_path: Path, states_path: Path) -> None:
-        run = weave.init("wancni-eth-z-rich/llm-sfm-translator")
-        run.log(metrics.get("metrics", {}))
-        run.log(
-            {
-                "scene_id": scene.get("scene_id"),
-                "scene_index": scene.get("scene_index"),
-                "config_path": str(config_path),
-                "states_path": str(states_path),
-                "flow_heatmap_path": metrics.get("flow_heatmap_path"),
-                "density_map_path": metrics.get("density_map_path"),
-            }
-        )
-
-        flow_path = metrics.get("flow_heatmap_path")
-        density_path = metrics.get("density_map_path")
-        if flow_path:
-            run.log({"plots/flow_heatmap": wandb.Image(flow_path)})
-        if density_path:
-            run.log({"plots/density_map": wandb.Image(density_path)})
-        run.finish()
-
+    
     # ---- orchestration ----
     def load_scene(self, path: Path) -> dict:
         data = json.loads(Path(path).read_text(encoding="utf-8"))
@@ -299,7 +301,6 @@ class SimulationRunner:
         config_path = self.generate_config(scene, model_name=model_name)
         sim_path = self.run_simulation(scene, config_path, steps=steps)
         metrics = self.evaluate(scene, sim_path, model_name)
-        self.log_wandb(scene, metrics, config_path, sim_path)
         return config_path, sim_path, metrics
 
 
@@ -330,7 +331,6 @@ def _parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--steps", type=int, default=150, help="Simulation steps.")
     parser.add_argument("--model-name", default="gpt-5", help="Label to embed in config filename.")
-    parser.add_argument("--wandb-project", default="wancni-eth-z-rich/llm-sfm-translator", help="Optional wandb project to log metrics.")
     return parser.parse_args()
 
 
@@ -358,7 +358,7 @@ def _scene_path_from_context_index(index: int, context_path: Path, preprocessed_
 
 def main() -> None:
     args = _parse_args()
-    runner = SimulationRunner(wandb_project=args.wandb_project)
+    runner = SimulationRunner()
     if args.context_index is not None:
         scene_path = _scene_path_from_context_index(args.context_index, args.context_path, args.preprocessed_dir)
     elif args.scene is not None:

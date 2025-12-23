@@ -46,7 +46,8 @@ MetricFunc = Callable[[np.ndarray, np.ndarray, dict], float]
 
 @dataclass
 class TrajectoryEvaluator:
-    collision_distance: float = 0.3
+    min_distance: float = 0.35
+    collision_distance: float = 0.7
     goal_radius: float = 0.5
     goal_tolerance: float = 0.0
     density_bins: int = 20
@@ -62,6 +63,7 @@ class TrajectoryEvaluator:
             "DDS",
             "GoalRate",
             "Hausdorff",
+            "SocialDistanceViolations"
         )
     )
     result: Dict[str, float] = field(default_factory=dict, init=False)
@@ -117,16 +119,45 @@ class TrajectoryEvaluator:
         speed_gt = np.linalg.norm(np.diff(gt, axis=0) / self.dt, axis=-1)
         return float(np.abs(speed_pred - speed_gt).mean())
 
-    def _metric_collision_rate(self, pred: np.ndarray, _: Optional[np.ndarray], __: dict) -> float:
+    def _metric_collision_rate(self, pred: np.ndarray, *_): # Fraction of pairs colliding per timestep:
+        T, N, _ = pred.shape
+        thr = self.collision_distance
+        total = 0
+        coll = 0
+
+        for t in range(T):
+            X = pred[t]  # (N,2)
+
+            # OPTIONAL: drop invalid agents if you have padding/NaNs
+            valid = np.isfinite(X).all(axis=1)
+            X = X[valid]
+            n = X.shape[0]
+            if n < 2:
+                continue
+
+            d = _pairwise_distances(X, X)
+            iu = np.triu_indices(n, k=1)   # unique pairs only
+            pair_d = d[iu]
+
+            total += pair_d.size
+            coll += np.sum(pair_d < thr)
+
+        return (coll / total) if total > 0 else 0.0
+
+    def _metric_social_distance_violations(self, pred: np.ndarray, _: Optional[np.ndarray], __: dict) -> float:
         T = pred.shape[0]
-        collisions = 0
+        violations = 0
+        total_pairs = 0
         for t in range(T):
             dists = _pairwise_distances(pred[t], pred[t])
-            mask = dists < self.collision_distance
+            mask = dists < self.collision_distance + self.min_distance
             np.fill_diagonal(mask, False)
-            if mask.any():
-                collisions += 1
-        return collisions / T
+            violations += np.sum(mask)
+            total_pairs += (pred.shape[1] * (pred.shape[1] - 1))  # total pairs at this timestep
+        if total_pairs == 0:
+            return 0.0
+        print(f"Social Distance Violations: {violations} out of {total_pairs} pairs.")
+        return violations / total_pairs
 
     def _metric_goal_rate(self, pred: np.ndarray, _: Optional[np.ndarray], ctx: dict) -> float:
         goals = ctx.get("goals")
@@ -192,6 +223,7 @@ class TrajectoryEvaluator:
         "VD": _metric_vd,
         "DDS": _metric_dds,
         "Hausdorff": _metric_hausdorff,
+        "SocialDistanceViolations": _metric_social_distance_violations,
     }
 
     def evaluate(
@@ -227,6 +259,7 @@ class TrajectoryEvaluator:
             "VD": True,
             "DDS": True,
             "Hausdorff": False,  # can run pred-only (pairwise) or pred-vs-gt
+            "SocialDistanceViolations": False,
         }
 
         for name in self.metrics:
