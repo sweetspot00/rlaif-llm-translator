@@ -27,6 +27,7 @@ import openai
 import pysocialforce as psf
 import toml
 from evaluation import TrajectoryEvaluator  
+from sim_traj_plot import plot_trajectory
 
 logger = logging.getLogger(__name__)
 # Reduce noisy debug logging from dependencies.
@@ -60,8 +61,8 @@ title = "Social Force Default Config File"
 [scene]
 enable_group = true
 agent_radius = 0.35
-step_width = 1.0
-max_speed_multiplier = 1.3
+step_width = 0.4 # seconds per simulation step
+max_speed_multiplier = 1.3 # max speed = multiplier * desired speed
 tau = 0.5
 resolution = 10
 
@@ -144,6 +145,7 @@ class SimulationRunner:
     config: dict = None
     min_distance: Optional[float] = None
     step_width: float = 0.4  # seconds per simulation step
+    if_need_traj_plot: bool = True
 
     def __post_init__(self) -> None:
         self.config_dir = self.results_root / "configs"
@@ -152,14 +154,14 @@ class SimulationRunner:
         for d in (self.config_dir, self.sim_dir, self.metrics_dir):
             d.mkdir(parents=True, exist_ok=True)
         self._init_client()
-        logger.info("SimulationRunner initialized (results_root=%s)", self.results_root)
+        logger.info(f"SimulationRunner initialized (results_root={self.results_root})")
 
     def _init_client(self) -> None:
         self.llm_client = openai.OpenAI(
                 api_key=os.environ.get("OPENAI_KEY"),
                 base_url="https://aikey-gateway.ivia.ch",
             )
-        logger.info("LLM client initialized (provider=%s, model=%s)", self.provider, self.model)
+        logger.info(f"LLM client initialized (provider={self.provider}, model={self.model})")
 
     def _chat_completion(self, user_prompt: str) -> str:
         messages = [
@@ -218,7 +220,7 @@ class SimulationRunner:
                 return loaded[loaded.files[0]]
             raise ValueError(f"No arrays found in obstacle npz: {path}")
         obstacles = np.asarray(loaded)
-        logger.info("Loaded obstacles: %s (shape=%s)", path, obstacles.shape)
+        logger.info(f"Loaded obstacles: {path} (shape={obstacles.shape})")
         return obstacles
 
     def _build_simulator(self, scene: dict, config_path: Path) -> psf.Simulator:
@@ -226,10 +228,9 @@ class SimulationRunner:
         groups = scene.get("groups") or None
         obstacles = self._load_obstacles(scene).tolist()
         logger.info(
-            "Building simulator: scene_id=%s, agents=%d, obstacles=%d",
-            scene.get("scene_id", "scene"),
-            initial_state.shape[0],
-            len(obstacles),
+            f"Building simulator: scene_id={scene.get('scene_id', 'scene')}, "
+            f"agents={initial_state.shape[0]}, obstacles={len(obstacles)}"
+            f"goals={len(scene.get('goals_m', []))}"
         )
         return psf.Simulator(
             state=initial_state,
@@ -240,24 +241,22 @@ class SimulationRunner:
 
     def run_simulation(self, scene: dict, config_path: Path, *, steps: int = 150) -> Path:
         sim = self._build_simulator(scene, config_path)
-        logger.info("Running simulation: scene_id=%s, steps=%d", scene.get("scene_id", "scene"), steps)
+        logger.info(f"Running simulation: scene_id={scene.get('scene_id', 'scene')}, steps={steps}")
         sim.step(n=steps)
         states, _ = sim.get_states()
         scene_id = scene.get("scene_id", "scene")
         out_path = self.sim_dir / f"sim_{scene_id}_{_timestamp()}.npz"
         np.savez_compressed(out_path, states=states, scene=scene)
-        logger.info("Simulation complete: saved states to %s", out_path)
+        logger.info(f"Simulation complete: saved states to {out_path}")
         return out_path
 
     # ---- metrics ----
     def evaluate(self, scene: dict, states_path: Path, model_name: str) -> dict:
         data = np.load(states_path, allow_pickle=True)
         states = data["states"]
+        scene_id = scene.get("scene_id", "scene")
         logger.info(
-            "Evaluating simulation: scene_id=%s, frames=%d, agents=%d",
-            scene.get("scene_id", "scene"),
-            states.shape[0],
-            states.shape[1],
+            f"Evaluating simulation: scene_id={scene_id}, frames={states.shape[0]}, agents={states.shape[1]}"
         )
         evaluator = TrajectoryEvaluator(
             collision_distance=_coerce_float(self.config["scene"]["agent_radius"] * 2) or 0.7,
@@ -270,11 +269,26 @@ class SimulationRunner:
             idx = np.arange(states.shape[1]) % goals.shape[0]
             goals = goals[idx]
         metrics = evaluator.evaluate(states[:, :, :2], gt=None, goals=goals)
-
-        scene_id = scene.get("scene_id", "scene")
         ts = _timestamp()
-        flow_path = self.metrics_dir / f"flow_{scene_id}_{model_name}_{ts}.png"
-        density_path = self.metrics_dir / f"density_{scene_id}_{model_name}_{ts}.png"
+        scene_idx = scene.get("scene_index")
+        scene_tag = f"{scene_idx:04d}_{scene_id}" if isinstance(scene_idx, int) else scene_id
+
+        traj_path = None
+        if self.if_need_traj_plot:
+            traj_path = self.metrics_dir / f"traj_{scene_tag}_{model_name}_{ts}.png"
+            try:
+                plot_trajectory(
+                    sim_path=states_path,
+                    scene_path=None,  # uses embedded scene
+                    obstacle_path=None,
+                    out_path=traj_path,
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(f"Failed to plot trajectories: {exc}")
+                traj_path = None
+
+        flow_path = self.metrics_dir / f"flow_{scene_tag}_{model_name}_{ts}.png"
+        density_path = self.metrics_dir / f"density_{scene_tag}_{model_name}_{ts}.png"
         try:
             evaluator.draw_flow_heatmap(states[:, :, :2], save_path=str(flow_path))
             evaluator.draw_density_map(states[:, :, :2], save_path=str(density_path))
@@ -288,9 +302,10 @@ class SimulationRunner:
             "states_path": str(states_path),
             "flow_heatmap_path": str(flow_path) if flow_path else None,
             "density_map_path": str(density_path) if density_path else None,
+            "trajectory_plot_path": str(traj_path) if traj_path else None,
         }
         logger.info("Evaluation metrics: %s", metrics)
-        out_path = self.metrics_dir / f"metrics_{scene_id}_{model_name}_{ts}.json"
+        out_path = self.metrics_dir / f"metrics_{scene_tag}_{model_name}_{ts}.json"
         # if the value is NaN, convert to string
         for k, v in out["metrics"].items():
             if isinstance(v, float) and (v != v):  # NaN check
@@ -303,7 +318,7 @@ class SimulationRunner:
         data = json.loads(Path(path).read_text(encoding="utf-8"))
         return data
 
-    def run_scene(self, scene_path: Path, *, config_path: Path, steps: int = 150, model_name: str = "gpt-5") -> tuple[Path, Path, dict]:
+    def run_scene(self, scene_path: Path, *, config_path: Path = None, steps: int = 150, model_name: str = "gpt-5") -> tuple[Path, Path, dict]:
         scene = self.load_scene(scene_path)
         if not config_path:
             config_path = self.generate_config(scene, model_name=model_name)
@@ -388,5 +403,4 @@ if __name__ == "__main__":
         preprocessed_dir=Path("preprocess/preprocessed_scene"),
     )
     runner.run_scene(test_scene, 
-                     steps=400,
-                     config_path="sim/results/configs/optimized.toml") # if giving config_path, it will skip llm generation
+                     steps=400) # if giving config_path, it will skip llm generation

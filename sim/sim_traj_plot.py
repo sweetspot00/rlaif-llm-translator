@@ -214,14 +214,34 @@ def plot_trajectory(
             goals_m[:, 0],
             goals_m[:, 1],
             marker="*",
-            s=90,
+            s=220,
             c="#e74c3c",
             edgecolors="white",
-            linewidths=0.8,
+            linewidths=1.6,
             label="goals",
             zorder=4,
         )
-        ax.legend(loc="upper right")
+
+    # Plot event center if provided (in meters).
+    event_center = scene.get("event_center_m")
+    if isinstance(event_center, (list, tuple, np.ndarray)) and len(event_center) == 2:
+        ec = np.asarray(event_center, dtype=float)
+        if np.all(np.isfinite(ec)):
+            ax.scatter(
+                [ec[0]],
+                [ec[1]],
+                marker="P",
+                s=200,
+                c="#2ecc71",
+                edgecolors="white",
+                linewidths=1.2,
+                label="event center",
+                zorder=4,
+            )
+    # Build legend if any labeled artists exist.
+    handles, labels = ax.get_legend_handles_labels()
+    if labels:
+        ax.legend(handles, labels, loc="upper right")
 
     ax.set_xlim(x_min - pad, x_max + pad)
     ax.set_ylim(y_min - pad, y_max + pad)

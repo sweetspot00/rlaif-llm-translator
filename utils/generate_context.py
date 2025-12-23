@@ -20,7 +20,7 @@ You need to generate the a desctription of the crowd scenario/event that falls i
 
 You also need to give the following information based on the map and your scenario:
 
-- crowd_size: 0-100 | 100-500 | 500-1000 | 1000+ (THE MAP SIZE is FIXED (width ≈ 301.7 m, height ≈ 282.8 m)need to consider the size of the map, the event could be large but the map is small, so the crowd size should be small accordingly)
+- crowd_size: 0-50 ｜ 50-100 | 100-500 | 500-1000 | 1000+ (THE MAP SIZE is FIXED (width ≈ 301.7 m, height ≈ 282.8 m)need to consider the size of the map, the event could be large but the map is small, so the crowd size should be small accordingly)
 - event_center: None | Pixel coordinations on the map (need to specify coordinates) | Distribution if the event center is a range of area
 - goal_location: None | Random (need to specify how many goal locations) | Pixel coordinations on the map (need to specify coordinates) | Distribution if the goal location is a range of area
 - desired_speed: average desired speed of the crowd in m/s (considering the crowd context and the map size). Use for initial pedestrian state generation.

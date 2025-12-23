@@ -51,7 +51,7 @@ class TrajectoryEvaluator:
     goal_radius: float = 0.5
     goal_tolerance: float = 0.0
     density_bins: int = 20
-    dt: float = 0.1
+    dt: float = 0.4 # step_width in seconds, align to pysocialforce default
     metrics: Iterable[str] = field(
         default_factory=lambda: (
             "ADE",

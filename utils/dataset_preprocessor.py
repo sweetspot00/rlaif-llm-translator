@@ -178,37 +178,44 @@ class ScenePreprocessor:
     rng: np.random.Generator = field(default_factory=np.random.default_rng)
     anchored_obstacles_dir: Path = Path("preprocess/pysfm_obstacles_meter_close_shape")
 
+    def _find_by_substring(self, directory: Path, tokens: list[str], extension: str) -> Path | None:
+        """
+        Return the first file in `directory` whose stem contains any of the tokens (case-insensitive).
+        """
+        if not directory.exists():
+            return None
+        files = sorted(directory.glob(f"*{extension}"))
+        tokens = [t.lower() for t in tokens if t]
+        for token in tokens:
+            for f in files:
+                if token in f.stem.lower():
+                    return f
+        return None
+
     def _load_assets(self, scene_id: str) -> tuple[np.ndarray, np.ndarray, np.ndarray, Path]:
         # Normalize scene id so we can match both raw names and stripped suffixes.
         base_id = scene_id
-        for suffix in ["_obstacle_simplified_obstacle", "_obstacle_simplified", "_obstacle"]:
+        for suffix in [
+            "_obstacle_simplified_obstacle",
+            "_simplified_obstacle",
+            "_obstacle_simplified",
+            "_obstacle",
+            "_simplified",
+        ]:
             if base_id.endswith(suffix):
                 base_id = base_id[: -len(suffix)]
                 break
+        core_id = base_id.lstrip("0123456789_")
 
-        png_candidates = [
-            self.obstacles_png_dir / f"{scene_id}.png",
-            self.obstacles_png_dir / f"{base_id}_obstacle_simplified_obstacle.png",
-            self.obstacles_png_dir / f"{base_id}_obstacle.png",
-            self.obstacles_png_dir / f"{base_id}.png",
-        ]
-        png_path = next((p for p in png_candidates if p.exists()), None)
+        tokens = [scene_id, base_id, core_id]
 
-        homography_candidates = [
-            self.homography_dir / f"{scene_id}.txt",
-            self.homography_dir / f"{base_id}_obstacle_simplified.txt",
-            self.homography_dir / f"{base_id}.txt",
-        ]
-        homography_path = next((h for h in homography_candidates if h.exists()), None)
+        png_path = self._find_by_substring(self.obstacles_png_dir, tokens, ".png")
+        homography_path = self._find_by_substring(self.homography_dir, tokens, ".txt")
 
         if png_path is None:
-            raise FileNotFoundError(
-                f"No obstacle PNG found for {scene_id} (checked: {', '.join(map(str, png_candidates))})"
-            )
+            raise FileNotFoundError(f"No obstacle PNG found for {scene_id} under {self.obstacles_png_dir}")
         if homography_path is None:
-            raise FileNotFoundError(
-                f"No homography found for {scene_id} (checked: {', '.join(map(str, homography_candidates))})"
-            )
+            raise FileNotFoundError(f"No homography found for {scene_id} under {self.homography_dir}")
 
         img = Image.open(png_path).convert("L")
         mask = (np.array(img, dtype=np.uint8) > 0)  # True = walkable
@@ -248,6 +255,40 @@ class ScenePreprocessor:
         mask: np.ndarray,
         walkable_points: np.ndarray,
     ) -> np.ndarray:
+        if isinstance(goal_location, dict):
+            gl_type = str(goal_location.get("type", "")).lower()
+            # Mixture of components: sample one goal from each component mean/sigma.
+            if "components" in goal_location:
+                goals: list[np.ndarray] = []
+                for comp in goal_location.get("components", []):
+                    mean_px = np.asarray(comp.get("mean_px", event_center_px), dtype=float)
+                    sigma_px = comp.get("sigma_px", self.goal_std_px)
+                    if isinstance(sigma_px, (list, tuple, np.ndarray)):
+                        std_px = float(np.mean(sigma_px))
+                    else:
+                        std_px = float(sigma_px)
+                    sampled = _sample_truncated_gaussian(
+                        self.rng, walkable_points, mask, mean_px=mean_px, std_px=std_px, n=1
+                    )[0]
+                    goals.append(sampled)
+                if goals:
+                    return np.vstack(goals)
+            # Single gaussian dict
+            if "gaussian" in gl_type:
+                mean_px = np.asarray(goal_location.get("mean_px", event_center_px), dtype=float)
+                sigma_px = goal_location.get("sigma_px", self.goal_std_px)
+                if isinstance(sigma_px, (list, tuple, np.ndarray)):
+                    std_px = float(np.mean(sigma_px))
+                else:
+                    std_px = float(sigma_px)
+                return _sample_truncated_gaussian(
+                    self.rng, walkable_points, mask, mean_px=mean_px, std_px=std_px, n=1
+                )
+            # Fallback: treat as fixed mean_px if provided
+            mean_px = np.asarray(goal_location.get("mean_px", event_center_px), dtype=float)
+            px = _nearest_walkable(mask, walkable_points, mean_px)
+            return np.vstack([px])
+
         if isinstance(goal_location, (list, tuple)):
             px = np.asarray(goal_location, dtype=float)
             px = _nearest_walkable(mask, walkable_points, px)
@@ -311,7 +352,21 @@ class ScenePreprocessor:
         mask, walkable_points, px_to_m, obstacle_png_path = self._load_assets(scene_id)
         self.desired_speed = context.get("desired_speed", 1.2)
         event_center_raw = context.get("event_center", (0, 0))
-        if isinstance(event_center_raw, str) and "gaussian" in event_center_raw.lower():
+        if isinstance(event_center_raw, dict):
+            ec_type = str(event_center_raw.get("type", "")).lower()
+            mean_px = np.asarray(event_center_raw.get("mean_px", walkable_points.mean(axis=0)), dtype=float)
+            sigma_px = event_center_raw.get("sigma_px", self.spawn_std_px)
+            if isinstance(sigma_px, (list, tuple, np.ndarray)):
+                std_px = float(np.mean(sigma_px))
+            else:
+                std_px = float(sigma_px)
+            if "gaussian" in ec_type:
+                event_center_px = _sample_truncated_gaussian(
+                    self.rng, walkable_points, mask, mean_px=mean_px, std_px=std_px, n=1
+                )[0]
+            else:
+                event_center_px = _nearest_walkable(mask, walkable_points, mean_px)
+        elif isinstance(event_center_raw, str) and "gaussian" in event_center_raw.lower():
             mean_px = walkable_points.mean(axis=0)
             event_center_px = _sample_truncated_gaussian(
                 self.rng, walkable_points, mask, mean_px=mean_px, std_px=self.spawn_std_px, n=1
@@ -419,4 +474,4 @@ if __name__ == "__main__":
     preprocessor = ScenePreprocessor()
     # Example usages:
     # preprocessor.process_one("00_Zurich_HB")
-    preprocessor.process_one(context_index=30)
+    preprocessor.process_one(context_index=9)
