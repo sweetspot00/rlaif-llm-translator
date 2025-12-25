@@ -1,0 +1,55 @@
+title = "ETH Campus Winter Walkway Bidirectional Flow"
+
+[scene]
+enable_group = true
+agent_radius = 0.40
+step_width = 0.5
+max_speed_multiplier = 1.15
+tau = 0.6
+resolution = 1
+
+[goal_attractive_force]
+factor = 1.1
+
+[ped_repulsive_force]
+factor = 1.9
+v0 = 2.3
+sigma = 0.35
+fov_phi = 120.0
+fov_factor = 0.4
+
+[space_repulsive_force]
+factor = 1.2
+u0 = 12
+r = 0.25
+
+[group_coherence_force]
+factor = 2.5
+
+[group_repulsive_force]
+factor = 1.0
+threshold = 0.60
+
+[group_gaze_force]
+factor = 3.0
+fov_phi = 85.0
+
+[desired_force]
+factor = 0.9
+relaxation_time = 0.6
+goal_threshold = 0.25
+
+[social_force]
+factor = 5.5
+lambda_importance = 2.3
+gamma = 0.35
+n = 2
+n_prime = 3
+
+[obstacle_force]
+factor = 12.0
+sigma = 0.25
+threshold = 3.0
+
+[along_wall_force]
+factor = 0.8

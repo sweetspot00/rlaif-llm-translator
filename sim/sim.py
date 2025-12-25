@@ -23,6 +23,7 @@ from typing import Callable, Optional
 import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import re
+import csv
 
 import numpy as np
 import openai  
@@ -30,6 +31,7 @@ import pysocialforce as psf
 import toml
 from evaluation import TrajectoryEvaluator  
 from sim_traj_plot import plot_trajectory
+from utils.convert_obstacle_to_meter import load_homography, pixel_to_meter_factory
 
 logger = logging.getLogger(__name__)
 # Reduce noisy debug logging from dependencies.
@@ -49,7 +51,6 @@ Respond ONLY with a JSON object containing:
 {
     "config_file": "TOML string with the config parameters.",
     "explanation": "Why you choose these parameters. ", 
-    "n_agents": "Suggested number of agents for the scenario.ONLY GIVE NUMBER",
     "min_distance": "Suggested minimum distance between agents in meters.ONLY GIVE NUMBER",
 }
   
@@ -137,6 +138,55 @@ def _coerce_float(value: object, *, default: Optional[float] = None) -> Optional
 def _safe_tag(text: str) -> str:
     """Sanitize text for filesystem-friendly tags."""
     return re.sub(r"[\\/:]+", "-", text.strip())
+
+def _process_gt_data(gt_path: Path) -> np.ndarray:
+    """
+    Load GT dense trajectories and return array of shape (T, N, 2) in meters.
+    - Uses homography + image height to anchor bottom-left pixel as (0, 0).
+    - Frames are 1-indexed in the CSV; output is indexed by frame number (0..max_frame).
+    - Missing frames for an agent remain NaN.
+    """
+    base_dir = gt_path.parent.parent  # e.g., downloads/gt/eth
+
+    def _first_match(directory: Path, pattern: str) -> Path | None:
+        matches = sorted(directory.glob(pattern))
+        return matches[0] if matches else None
+
+    homo_path = _first_match(base_dir / "homography", "*_H.txt")
+    info_path = _first_match(base_dir / "information", "*_info.json")
+    if homo_path is None or info_path is None:
+        raise FileNotFoundError(f"Missing homography/info under {base_dir}")
+    info = json.loads(info_path.read_text())
+    height = info.get("height")
+    if height is None:
+        raise ValueError(f"'height' missing in {info_path}")
+    H = load_homography(homo_path)
+    px_to_m = pixel_to_meter_factory(H, origin_px=(0.0, float(height)))
+
+    agents: dict[str, list[tuple[int, float, float]]] = {}
+    max_frame = 0
+    with gt_path.open("r", newline="") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            frame = int(row["frame"])
+            x = float(row["x"])
+            y = float(row["y"])
+            agent = row["agent_id"]
+            ax, ay = px_to_m((x, y))
+            if agent not in agents:
+                agents[agent] = []
+            agents[agent].append((frame, ax, ay))
+            max_frame = max(max_frame, frame)
+
+    agent_ids = sorted(agents.keys(), key=lambda a: int(a))
+    T = max_frame + 1
+    N = len(agent_ids)
+    traj = np.full((T, N, 2), np.nan, dtype=float)
+    for j, aid in enumerate(agent_ids):
+        for frame, ax, ay in agents[aid]:
+            traj[frame, j, 0] = ax
+            traj[frame, j, 1] = ay
+    return traj
 
 
 @dataclass
@@ -260,14 +310,33 @@ class SimulationRunner:
         logger.info(f"Simulation complete: saved states to {out_path}")
         return out_path
 
+
     # ---- metrics ----
-    def evaluate(self, scene: dict, states_path: Path, model_name: str) -> dict:
+    def evaluate(self, scene: dict, states_path: Path, model_name: str, gt_path: Path = None) -> dict:
         data = np.load(states_path, allow_pickle=True)
         states = data["states"]
         scene_id = scene.get("scene_id", "scene")
         logger.info(
             f"Evaluating simulation: scene_id={scene_id}, frames={states.shape[0]}, agents={states.shape[1]}"
         )
+        if gt_path is not None:
+            logger.info(f"Loading GT data from {gt_path}")
+            gt_traj = _process_gt_data(gt_path)
+            T_common = min(states.shape[0], gt_traj.shape[0])
+            N_common = min(states.shape[1], gt_traj.shape[1])
+            states_eval = states[:T_common, :N_common, :2]
+            gt_eval = gt_traj[:T_common, :N_common, :]
+            # keep only timesteps where all agents have finite GT
+            valid_mask = np.isfinite(gt_eval).all(axis=(1, 2))
+            if not valid_mask.any():
+                logger.warning("GT data has no fully valid timesteps; skipping GT metrics.")
+                gt_eval = None
+            else:
+                states_eval = states_eval[valid_mask]
+                gt_eval = gt_eval[valid_mask]
+        else:
+            gt_eval = None
+            states_eval = states[:, :, :2]
         evaluator = TrajectoryEvaluator(
             collision_distance=_coerce_float(self.config["scene"]["agent_radius"] * 2) or 0.7,
             min_distance=self.min_distance or 0.35,
@@ -275,10 +344,10 @@ class SimulationRunner:
         )
         goals = np.asarray(scene["goals_m"], dtype=float)
         # pad goals to match agents
-        if goals.shape[0] < states.shape[1]:
-            idx = np.arange(states.shape[1]) % goals.shape[0]
+        if goals.shape[0] < states_eval.shape[1]:
+            idx = np.arange(states_eval.shape[1]) % goals.shape[0]
             goals = goals[idx]
-        metrics = evaluator.evaluate(states[:, :, :2], gt=None, goals=goals)
+        metrics = evaluator.evaluate(states_eval, gt=gt_eval, goals=goals)
         ts = _timestamp()
         scene_idx = scene.get("scene_index")
         scene_tag = f"{scene_idx:04d}_{scene_id}" if isinstance(scene_idx, int) else scene_id
@@ -329,14 +398,18 @@ class SimulationRunner:
         data = json.loads(Path(path).read_text(encoding="utf-8"))
         return data
 
-    def run_scene(self, scene_path: Path, *, config_path: Path = None, steps: int = 150, model_name: str = "gpt-5") -> tuple[Path, Path, dict]:
+    def run_scene(self, scene_path: Path, *, 
+                  config_path: Path = None, 
+                  steps: int = 150, 
+                  model_name: str = "gpt-5", 
+                  gt_path: Path = None) -> tuple[Path, Path, dict]:
         scene = self.load_scene(scene_path)
         if not config_path:
             config_path = self.generate_config(scene, model_name=model_name)
         else:
             self.config = toml.load(config_path)
         sim_path = self.run_simulation(scene, config_path, steps=steps)
-        metrics = self.evaluate(scene, sim_path, model_name)
+        metrics = self.evaluate(scene, sim_path, model_name, gt_path)
         return config_path, sim_path, metrics
 
     def run_all_preprocessed(
@@ -386,7 +459,7 @@ class SimulationRunner:
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="LLM -> pysocialforce simulation pipeline.")
     parser.add_argument(
-        "scene",
+        "--scene",
         type=Path,
         nargs="?",
         help="Path to preprocessed scene JSON. Optional if --context-index is provided.",
@@ -407,6 +480,12 @@ def _parse_args() -> argparse.Namespace:
         type=Path,
         default=Path("preprocess/preprocessed_scene"),
         help="Directory containing preprocessed scene JSON files.",
+    )
+    # gt if given
+    parser.add_argument(
+        "--gt-path",
+        type=Path, # downloads/gt/eth/trajectory_dense/seq_eth_trajectory_dense.csv
+        help="GT if run the gt scene",
     )
     parser.add_argument("--steps", type=int, default=500, help="Simulation steps.")
     parser.add_argument("--model-name", default="azure/gpt-5", help="Label to embed in config filename.")
@@ -455,7 +534,11 @@ def main() -> None:
         scene_path = args.scene
     else:
         raise ValueError("Provide either a scene path or --context-index.")
-    runner.run_scene(scene_path, steps=args.steps, model_name=args.model_name)
+    gt_path = None
+    if args.gt_path is not None:
+        gt_path = args.gt_path
+
+    runner.run_scene(scene_path, steps=args.steps, model_name=args.model_name, gt_path=gt_path)
 
 
 if __name__ == "__main__":
