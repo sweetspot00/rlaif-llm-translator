@@ -1,0 +1,55 @@
+title = "Zurich HB Southeast Concourse Dance Group"
+
+[scene]
+enable_group = true
+agent_radius = 0.32
+step_width = 0.3
+max_speed_multiplier = 1.5
+tau = 0.45
+resolution = 1
+
+[goal_attractive_force]
+factor = 1.1
+
+[ped_repulsive_force]
+factor = 1.2
+v0 = 2.0
+sigma = 0.3
+fov_phi = 120.0
+fov_factor = 0.6
+
+[space_repulsive_force]
+factor = 0.9
+u0 = 8.0
+r = 0.25
+
+[group_coherence_force]
+factor = 4.5
+
+[group_repulsive_force]
+factor = 0.6
+threshold = 0.45
+
+[group_gaze_force]
+factor = 5.5
+fov_phi = 100.0
+
+[desired_force]
+factor = 1.0
+relaxation_time = 0.4
+goal_threshold = 0.25
+
+[social_force]
+factor = 5.3
+lambda_importance = 1.8
+gamma = 0.35
+n = 2
+n_prime = 3
+
+[obstacle_force]
+factor = 8.0
+sigma = 0.25
+threshold = 4.0
+
+[along_wall_force]
+factor = 0.5

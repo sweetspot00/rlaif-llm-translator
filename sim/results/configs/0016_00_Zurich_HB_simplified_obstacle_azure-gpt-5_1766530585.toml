@@ -1,0 +1,55 @@
+title = "Station Minor Scuffle with Staff Intervention"
+
+[scene]
+enable_group = true
+agent_radius = 0.30
+step_width = 0.3 # seconds per simulation step
+max_speed_multiplier = 1.2 # travelers slow slightly near disturbance
+tau = 0.45
+resolution = 1 # meters per unit
+
+[goal_attractive_force]
+factor = 1.1 # keep travelers goal-focused to promote rerouting
+
+[ped_repulsive_force]
+factor = 2.0 # heightened interpersonal avoidance near scuffle
+v0 = 2.4
+sigma = 0.3
+fov_phi = 110.0 # wider awareness in front due to vigilance
+fov_factor = 0.4 # reduced influence from behind
+
+[space_repulsive_force]
+factor = 1.1
+u0 = 12
+r = 0.25
+
+[group_coherence_force]
+factor = 3.0 # staff/companions stay cohesive when intervening
+
+[group_repulsive_force]
+factor = 1.2
+threshold = 0.6 # keep small separation between groups in tight area
+
+[group_gaze_force]
+factor = 4.0
+fov_phi = 90.0
+
+[desired_force]
+factor = 1.0
+relaxation_time = 0.45
+goal_threshold = 0.2
+
+[social_force]
+factor = 5.3
+lambda_importance = 2.2 # stronger desire-direction weighting aids rerouting
+gamma = 0.35
+n = 2
+n_prime = 3
+
+[obstacle_force]
+factor = 12.0 # strong avoidance of ticket machine / ad hoc cordon
+sigma = 0.25
+threshold = 3.5 # start avoiding a few meters out to reroute early
+
+[along_wall_force]
+factor = 1.2 # flow guidance along boundaries during detours

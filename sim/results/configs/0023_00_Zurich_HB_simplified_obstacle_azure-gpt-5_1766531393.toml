@@ -1,0 +1,54 @@
+title = "Panic Back-Away from Platform Entry"
+
+[scene]
+enable_group = true
+agent_radius = 0.33
+step_width = 0.2
+max_speed_multiplier = 1.7
+tau = 0.35
+resolution = 1
+
+[goal_attractive_force]
+factor = 1.2
+
+[ped_repulsive_force]
+factor = 2.4
+v0 = 3.0
+sigma = 0.28
+fov_phi = 85.0
+fov_factor = 0.3
+
+[space_repulsive_force]
+factor = 1.2
+u0 = 18.0
+r = 0.2
+
+[group_coherence_force]
+factor = 0.8
+
+[group_repulsive_force]
+factor = 1.2
+threshold = 0.5
+
+[group_gaze_force]
+factor = 1.0
+fov_phi = 60.0
+
+[desired_force]
+factor = 1.2
+relaxation_time = 0.35
+goal_threshold = 0.3
+
+[social_force]
+factor = 6.0
+lambda_importance = 2.5
+gamma = 0.35
+n = 2
+n_prime = 3
+
+[obstacle_force]
+factor = 14.0
+sigma = 0.25
+threshold = 4.0
+
+[along_wall_force]

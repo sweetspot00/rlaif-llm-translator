@@ -12,11 +12,17 @@ import argparse
 from pathlib import Path
 from typing import Iterable, List, Sequence, Tuple
 
+import sys
+
+ROOT = Path(__file__).resolve().parent.parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
 import matplotlib.pyplot as plt
 import numpy as np
 from PIL import Image
 
-from convert_obstacle_to_meter import load_homography, pixel_to_meter_factory
+from convert_obstacle_to_meter import load_homography, pixel_to_meter_factory, find_homography as find_homography_exact
 
 
 def boundary_segments_from_mask(mask: np.ndarray) -> List[Tuple[int, int, int, int]]:
@@ -127,15 +133,35 @@ def rasterize_segments(shape: Tuple[int, int], segments: Sequence[Tuple[Tuple[in
 
 def process(
     obstacle_png: Path,
-    homography_path: Path,
     out_npz: Path,
     out_plot: Path,
+    homography_path: Path | None,
+    homographies_dir: Path | None = None,
     threshold: int = 127,
 ) -> np.ndarray:
     image = Image.open(obstacle_png).convert("L")
     mask = np.array(image) <= threshold  # True where obstacle
     segments_px = boundary_segments_from_mask(mask)
     merged_segments_px = merge_collinear(segments_px)
+
+    if homography_path is None:
+        # Try exact match helper first, then fuzzy contains match.
+        if homographies_dir is None:
+            homographies_dir = obstacle_png.parent.parent / "homographies"
+        h_exact = find_homography_exact(obstacle_png, homographies_dir)
+        if h_exact is not None:
+            homography_path = h_exact
+        else:
+            stem = obstacle_png.stem.lower()
+            base_stem = stem.replace("_simplified_obstacle", "").replace("_obstacle", "")
+            candidates = []
+            for h in homographies_dir.glob("*.txt"):
+                hstem = h.stem.lower()
+                if stem in hstem or hstem in stem or base_stem in hstem or hstem in base_stem:
+                    candidates.append(h)
+            homography_path = sorted(candidates)[0] if candidates else None
+        if homography_path is None:
+            raise FileNotFoundError(f"No homography found for {obstacle_png.name} in {homographies_dir}")
 
     H = load_homography(homography_path)
     origin_px = (0.0, float(image.height))  # bottom-left anchored at (0,0) meters
@@ -162,23 +188,56 @@ def process(
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Build PySocialForce line obstacles from a simplified obstacle PNG.")
     parser.add_argument("--obstacle-png", type=Path, required=True, help="Path to binary obstacle PNG.")
-    parser.add_argument("--homography", type=Path, required=True, help="Path to 3x3 homography txt.")
-    parser.add_argument("--out-npz", type=Path, required=True, help="Path to write npz with 'obstacles' array.")
-    parser.add_argument("--out-plot", type=Path, required=True, help="Path to write visualization PNG.")
+    parser.add_argument(
+        "--homography",
+        type=Path,
+        default=None,
+        help="Path to 3x3 homography txt. If omitted, attempts fuzzy match in --homographies-dir.",
+    )
+    parser.add_argument(
+        "--homographies-dir",
+        type=Path,
+        default=Path("downloads/google_maps/homographies"),
+        help="Directory to search for homography txt when --homography is not provided.",
+    )
+    parser.add_argument(
+        "--out-npz",
+        type=Path,
+        default=None,
+        help="Path to write npz with 'obstacles' array. Defaults to <stem>_anchored.npz beside --out-plot or obstacle.",
+    )
+    parser.add_argument(
+        "--out-plot",
+        type=Path,
+        default=None,
+        help="Path to write visualization PNG. Defaults to <stem>_anchored.png beside out-npz.",
+    )
     parser.add_argument("--threshold", type=int, default=127, help="Pixels <= threshold treated as obstacle.")
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
+    stem = args.obstacle_png.stem
+    default_npz_dir = Path("preprocess/pysfm_obstacles_meter_close_shape")
+    default_plot_dir = default_npz_dir / "line_obstacle_img"
+
+    base_out = args.out_npz if args.out_npz else default_npz_dir / f"{stem}_anchored.npz"
+    out_npz = base_out
+    out_plot = args.out_plot if args.out_plot else default_plot_dir / f"{stem}_anchored.png"
+
+    out_npz.parent.mkdir(parents=True, exist_ok=True)
+    out_plot.parent.mkdir(parents=True, exist_ok=True)
+
     obstacles_m = process(
         obstacle_png=args.obstacle_png,
         homography_path=args.homography,
-        out_npz=args.out_npz,
-        out_plot=args.out_plot,
+        homographies_dir=args.homographies_dir,
+        out_npz=out_npz,
+        out_plot=out_plot,
         threshold=args.threshold,
     )
-    print(f"Saved {args.out_npz} with {obstacles_m.shape[0]} segments; plot at {args.out_plot}")
+    print(f"Saved {out_npz} with {obstacles_m.shape[0]} segments; plot at {out_plot}")
 
 
 if __name__ == "__main__":

@@ -1,0 +1,54 @@
+title = "Zurich HB Right Corridor Panic Flight"
+
+[scene]
+enable_group = true
+agent_radius = 0.3
+step_width = 0.2
+max_speed_multiplier = 2.5
+tau = 0.35
+resolution = 1
+
+[goal_attractive_force]
+factor = 1.8
+
+[ped_repulsive_force]
+factor = 1.7
+v0 = 2.8
+sigma = 0.25
+fov_phi = 75.0
+fov_factor = 0.3
+
+[space_repulsive_force]
+factor = 1.2
+u0 = 12
+r = 0.25
+
+[group_coherence_force]
+factor = 0.8
+
+[group_repulsive_force]
+factor = 1.3
+threshold = 0.6
+
+[group_gaze_force]
+factor = 1.0
+fov_phi = 60.0
+
+[desired_force]
+factor = 1.3
+relaxation_time = 0.3
+goal_threshold = 0.25
+
+[social_force]
+factor = 5.5
+lambda_importance = 3.0
+gamma = 0.45
+n = 2
+n_prime = 3
+
+[obstacle_force]
+factor = 15.0
+sigma = 0.15
+threshold = 8.0
+
+[along_wall_force]

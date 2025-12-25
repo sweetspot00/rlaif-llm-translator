@@ -21,6 +21,8 @@ import os
 from pathlib import Path
 from typing import Callable, Optional
 import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import re
 
 import numpy as np
 import openai  
@@ -132,6 +134,11 @@ def _coerce_float(value: object, *, default: Optional[float] = None) -> Optional
     return default
 
 
+def _safe_tag(text: str) -> str:
+    """Sanitize text for filesystem-friendly tags."""
+    return re.sub(r"[\\/:]+", "-", text.strip())
+
+
 @dataclass
 class SimulationRunner:
     """Pipeline orchestrator for LLM -> config -> simulation -> metrics."""
@@ -200,7 +207,10 @@ class SimulationRunner:
         self.step_width = _coerce_float(self.config.get("scene", {}).get("step_width"), default=0.4)
 
         scene_id = scene.get("scene_id", "scene")
-        out_path = self.config_dir / f"{scene_id}_{model_name}_{_timestamp()}.toml"
+        scene_idx = scene.get("scene_index")
+        scene_tag = f"{scene_idx:04d}_{scene_id}" if isinstance(scene_idx, int) else scene_id
+        safe_model = _safe_tag(model_name)  # azure/gpt-5 -> azure-gpt-5 to avoid filesystem issues
+        out_path = self.config_dir / f"{scene_tag}_{safe_model}_{_timestamp()}.toml"
         if not config_text.endswith("\n"):
             config_text += "\n"
         out_path.write_text(config_text, encoding="utf-8")
@@ -273,9 +283,10 @@ class SimulationRunner:
         scene_idx = scene.get("scene_index")
         scene_tag = f"{scene_idx:04d}_{scene_id}" if isinstance(scene_idx, int) else scene_id
 
+        safe_model = _safe_tag(model_name)
         traj_path = None
         if self.if_need_traj_plot:
-            traj_path = self.metrics_dir / f"traj_{scene_tag}_{model_name}_{ts}.png"
+            traj_path = self.metrics_dir / f"traj_{scene_tag}_{safe_model}_{ts}.png"
             try:
                 plot_trajectory(
                     sim_path=states_path,
@@ -287,8 +298,8 @@ class SimulationRunner:
                 logger.warning(f"Failed to plot trajectories: {exc}")
                 traj_path = None
 
-        flow_path = self.metrics_dir / f"flow_{scene_tag}_{model_name}_{ts}.png"
-        density_path = self.metrics_dir / f"density_{scene_tag}_{model_name}_{ts}.png"
+        flow_path = self.metrics_dir / f"flow_{scene_tag}_{safe_model}_{ts}.png"
+        density_path = self.metrics_dir / f"density_{scene_tag}_{safe_model}_{ts}.png"
         try:
             evaluator.draw_flow_heatmap(states[:, :, :2], save_path=str(flow_path))
             evaluator.draw_density_map(states[:, :, :2], save_path=str(density_path))
@@ -305,7 +316,7 @@ class SimulationRunner:
             "trajectory_plot_path": str(traj_path) if traj_path else None,
         }
         logger.info("Evaluation metrics: %s", metrics)
-        out_path = self.metrics_dir / f"metrics_{scene_tag}_{model_name}_{ts}.json"
+        out_path = self.metrics_dir / f"metrics_{scene_tag}_{safe_model}_{ts}.json"
         # if the value is NaN, convert to string
         for k, v in out["metrics"].items():
             if isinstance(v, float) and (v != v):  # NaN check
@@ -327,6 +338,49 @@ class SimulationRunner:
         sim_path = self.run_simulation(scene, config_path, steps=steps)
         metrics = self.evaluate(scene, sim_path, model_name)
         return config_path, sim_path, metrics
+
+    def run_all_preprocessed(
+        self,
+        preprocessed_dir: Path,
+        *,
+        steps: int = 500,
+        model_name: str = "azure/gpt-5",
+        max_workers: int = 4,
+    ) -> list[tuple[Path, Path, dict]]:
+        """
+        Run simulations for all preprocessed scenes in a directory using threading to parallelize work.
+        """
+        files = sorted(p for p in preprocessed_dir.glob("*.json"))
+        if not files:
+            raise FileNotFoundError(f"No preprocessed scenes found in {preprocessed_dir}")
+
+        results: list[tuple[Path, Path, dict]] = []
+
+        def _worker(scene_path: Path):
+            # Fresh runner per thread to avoid shared mutable state.
+            runner = SimulationRunner(
+                results_root=self.results_root,
+                provider=self.provider,
+                base_url=self.base_url,
+                model=self.model,
+                api_key=self.api_key,
+                llm_client=None,
+                if_need_traj_plot=self.if_need_traj_plot,
+            )
+            return runner.run_scene(scene_path, steps=steps, model_name=model_name)
+
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            future_to_path = {executor.submit(_worker, p): p for p in files}
+            for future in as_completed(future_to_path):
+                path = future_to_path[future]
+                try:
+                    cfg, sim, metrics = future.result()
+                    results.append((cfg, sim, metrics))
+                    logger.info(f"Completed simulation for {path.name}")
+                except Exception as exc:  # noqa: BLE001
+                    logger.error(f"Failed simulation for {path.name}: {exc}")
+
+        return results
 
 
 def _parse_args() -> argparse.Namespace:
@@ -354,8 +408,10 @@ def _parse_args() -> argparse.Namespace:
         default=Path("preprocess/preprocessed_scene"),
         help="Directory containing preprocessed scene JSON files.",
     )
-    parser.add_argument("--steps", type=int, default=150, help="Simulation steps.")
-    parser.add_argument("--model-name", default="gpt-5", help="Label to embed in config filename.")
+    parser.add_argument("--steps", type=int, default=500, help="Simulation steps.")
+    parser.add_argument("--model-name", default="azure/gpt-5", help="Label to embed in config filename.")
+    parser.add_argument("--run-all", action="store_true", help="Simulate all scenes under --preprocessed-dir.")
+    parser.add_argument("--max-workers", type=int, default=4, help="Parallel workers when using --run-all.")
     return parser.parse_args()
 
 
@@ -384,6 +440,15 @@ def _scene_path_from_context_index(index: int, context_path: Path, preprocessed_
 def main() -> None:
     args = _parse_args()
     runner = SimulationRunner()
+    if args.run_all:
+        runner.run_all_preprocessed(
+            preprocessed_dir=args.preprocessed_dir,
+            steps=args.steps,
+            model_name=args.model_name,
+            max_workers=args.max_workers,
+        )
+        return
+
     if args.context_index is not None:
         scene_path = _scene_path_from_context_index(args.context_index, args.context_path, args.preprocessed_dir)
     elif args.scene is not None:
