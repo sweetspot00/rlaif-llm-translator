@@ -1,0 +1,61 @@
+{
+  "scene_id": "eth_win52_3066_3132",
+  "scene_index": 52,
+  "scenario": "A cold winter daytime scene on an ETH campus walkway: snow blankets the lawns while pedestrians funnel through a cleared central path.",
+  "category": "GT",
+  "crowd_size_label": "5",
+  "crowd_size": 5,
+  "ungrouped_agents": 5,
+  "event_center_px": [],
+  "event_center_m": [],
+  "goals_px": [],
+  "goals_m": [],
+  "initial_state": [
+    [
+      12.592142,
+      3.0084104,
+      -0.27941179,
+      0.0027416715,
+      12.517308,
+      3.0091447
+    ],
+    [
+      6.772322,
+      8.0888596,
+      0.0,
+      0.0,
+      6.3313404,
+      8.7852434
+    ],
+    [
+      8.0931005,
+      8.8354351,
+      -0.052132647,
+      0.0046239723,
+      8.0493125,
+      8.7989932
+    ],
+    [
+      4.2115247,
+      3.1785273,
+      1.4318289,
+      0.42164665,
+      11.204354,
+      4.6128482
+    ],
+    [
+      4.3394276,
+      3.7026275,
+      1.3203063,
+      0.46833118,
+      11.068102,
+      5.0923294
+    ]
+  ],
+  "groups": [],
+  "assets": {
+    "anchored_obstacles": "preprocess/pysfm_obstacles_meter_close_shape/gt_eth_simplified_obstacle_anchored.npz",
+    "homography": "downloads/gt/eth/obstacle/H.txt"
+  },
+  "steps": 12
+}

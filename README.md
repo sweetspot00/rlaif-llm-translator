@@ -13,3 +13,8 @@ TODO: Multi-thread sim
 
 5. Trajectory plot
 Need simulated result `sim/results/simulations` and scene(preprocessed data) `preprocess/preprocessed_scene`
+
+
+google map 的h是pixel -> world(m)
+
+gt's H is world(m) -> pixel

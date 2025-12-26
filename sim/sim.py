@@ -140,53 +140,81 @@ def _safe_tag(text: str) -> str:
     """Sanitize text for filesystem-friendly tags."""
     return re.sub(r"[\\/:]+", "-", text.strip())
 
-def _process_gt_data(gt_path: Path) -> np.ndarray:
-    """
-    Load GT dense trajectories and return array of shape (T, N, 2) in meters.
-    - Uses homography + image height to anchor bottom-left pixel as (0, 0).
-    - Frames are 1-indexed in the CSV; output is indexed by frame number (0..max_frame).
-    - Missing frames for an agent remain NaN.
-    """
-    base_dir = gt_path.parent.parent  # e.g., downloads/gt/eth
 
-    def _first_match(directory: Path, pattern: str) -> Path | None:
-        matches = sorted(directory.glob(pattern))
-        return matches[0] if matches else None
+def _process_gt_data(gt_path: Path, *, apply_homography: bool = False) -> np.ndarray:
+    """
+    Load a windowed GT CSV (scene,agent_id,agent_type,frame,x,y) and return an
+    array shaped (T, N, 2). Missing observations
+    are filled with NaN so downstream filtering can drop incomplete timesteps.
 
-    homo_path = _first_match(base_dir / "homography", "*_H.txt")
-    info_path = _first_match(base_dir / "information", "*_info.json")
-    if homo_path is None or info_path is None:
-        raise FileNotFoundError(f"Missing homography/info under {base_dir}")
-    info = json.loads(info_path.read_text())
-    height = info.get("height")
-    if height is None:
-        raise ValueError(f"'height' missing in {info_path}")
-    H = load_homography(homo_path)
-    px_to_m = pixel_to_meter_factory(H, origin_px=(0.0, float(height)))
+    GT from ETH/UCY obsmat-derived windows is already in world meters, so
+    homography is skipped by default. Set apply_homography=True only if your
+    GT is in pixel space and needs conversion.
+    """
+    gt_path = Path(gt_path)
+    if not gt_path.exists():
+        raise FileNotFoundError(f"GT CSV not found: {gt_path}")
+
+    px_to_m = None
+    if apply_homography:
+        homography_path = gt_path.parent.parent / "obstacle" / "H.txt"
+        ref_mask_path = gt_path.parent.parent / "obstacle" / "reference_mask.png"
+        if homography_path.exists() and ref_mask_path.exists():
+            try:
+                from PIL import Image
+
+                H = load_homography(homography_path)
+                img = Image.open(ref_mask_path)
+                origin_px = (0.0, float(img.height))  # bottom-left pixel anchors (0, 0)
+                px_to_m = pixel_to_meter_factory(H, origin_px)
+                logger.info("Applying homography for GT using %s", homography_path)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Falling back to raw GT coords (homography error: %s)", exc)
+                px_to_m = None
+        else:
+            logger.warning("Homography or reference mask missing for GT; using raw coords.")
 
     agents: dict[str, list[tuple[int, float, float]]] = {}
     max_frame = 0
     with gt_path.open("r", newline="") as f:
         reader = csv.DictReader(f)
         for row in reader:
-            frame = int(row["frame"])
-            x = float(row["x"])
-            y = float(row["y"])
-            agent = row["agent_id"]
-            ax, ay = px_to_m((x, y))
-            if agent not in agents:
-                agents[agent] = []
-            agents[agent].append((frame, ax, ay))
+            try:
+                frame = int(float(row["frame"]))
+                aid_raw = row["agent_id"]
+                aid = str(int(float(aid_raw))) if aid_raw else "unknown"
+                x = float(row["x"])
+                y = float(row["y"])
+            except (KeyError, ValueError, TypeError) as exc:  # noqa: BLE001
+                logger.warning("Skipping malformed GT row %s (%s)", row, exc)
+                continue
+
+            if px_to_m is not None:
+                xy_m = px_to_m(np.array([[x, y]], dtype=np.float64))[0]
+                x, y = float(xy_m[0]), float(xy_m[1])
+
+            agents.setdefault(aid, []).append((frame, x, y))
             max_frame = max(max_frame, frame)
 
-    agent_ids = sorted(agents.keys(), key=lambda a: int(a))
-    T = max_frame + 1
-    N = len(agent_ids)
-    traj = np.full((T, N, 2), np.nan, dtype=float)
+    if not agents:
+        raise ValueError(f"No GT trajectories found in {gt_path}")
+
+    def _agent_sort_key(agent_id: str) -> tuple[int, str]:
+        try:
+            return (0, int(float(agent_id)))
+        except Exception:  # noqa: BLE001
+            return (1, agent_id)
+
+    agent_ids = sorted(agents.keys(), key=_agent_sort_key)
+    traj = np.full((max_frame + 1, len(agent_ids), 2), np.nan, dtype=np.float64)
+
     for j, aid in enumerate(agent_ids):
-        for frame, ax, ay in agents[aid]:
-            traj[frame, j, 0] = ax
-            traj[frame, j, 1] = ay
+        for frame, x, y in sorted(agents[aid], key=lambda t: t[0]):
+            if frame < 0:
+                continue
+            traj[frame, j, 0] = x
+            traj[frame, j, 1] = y
+
     return traj
 
 
@@ -255,7 +283,7 @@ class SimulationRunner:
         config_dict = toml.loads(config_text)
         self.config = config_dict
         self.min_distance = _coerce_float(response.get("min_distance"))
-        if scene.get().get("step_width") is not None: # gt already has step_width
+        if scene.get("step_width") is not None: # gt already has step_width
             self.step_width = _coerce_float(scene.get().get("step_width"))
         else:
             self.step_width = _coerce_float(self.config.get("scene", {}).get("step_width"), default=0.4)
@@ -306,6 +334,7 @@ class SimulationRunner:
     def run_simulation(self, scene: dict, config_path: Path, *, steps: int = 150) -> Path:
         sim = self._build_simulator(scene, config_path)
         logger.info(f"Running simulation: scene_id={scene.get('scene_id', 'scene')}, steps={steps}")
+        logger.info(f"Simulation step width: {self.step_width}, steps: {steps}")
         sim.step(n=steps)
         states, _ = sim.get_states()
         scene_id = scene.get("scene_id", "scene")
@@ -324,12 +353,11 @@ class SimulationRunner:
         )
         if gt_path is not None:
             logger.info(f"Loading GT data from {gt_path}")
-            gt_traj = _process_gt_data(gt_path)
+            gt_traj = _process_gt_data(gt_path, apply_homography=False)
             T_common = min(states.shape[0], gt_traj.shape[0])
             N_common = min(states.shape[1], gt_traj.shape[1])
             states_eval = states[:T_common, :N_common, :2]
             gt_eval = gt_traj[:T_common, :N_common, :]
-            # keep only timesteps where all agents have finite GT
             valid_mask = np.isfinite(gt_eval).all(axis=(1, 2))
             if not valid_mask.any():
                 logger.warning("GT data has no fully valid timesteps; skipping GT metrics.")
@@ -345,12 +373,15 @@ class SimulationRunner:
             min_distance=self.min_distance or 0.35,
             dt = self.step_width,
         )
-        goals = np.asarray(scene["goals_m"], dtype=float)
-        # pad goals to match agents
-        if goals.shape[0] < states_eval.shape[1]:
-            idx = np.arange(states_eval.shape[1]) % goals.shape[0]
-            goals = goals[idx]
-        metrics = evaluator.evaluate(states_eval, gt=gt_eval, goals=goals)
+        goals = np.asarray(scene.get("goals_m", []), dtype=float)
+        if goals.size == 0:
+            goals_ctx = None
+        else:
+            if goals.shape[0] < states_eval.shape[1]:
+                idx = np.arange(states_eval.shape[1]) % goals.shape[0]
+                goals = goals[idx]
+            goals_ctx = goals
+        metrics = evaluator.evaluate(states_eval, gt=gt_eval, goals=goals_ctx)
         ts = _timestamp()
         scene_idx = scene.get("scene_index")
         scene_tag = f"{scene_idx:04d}_{scene_id}" if isinstance(scene_idx, int) else scene_id
@@ -411,6 +442,8 @@ class SimulationRunner:
             config_path = self.generate_config(scene, model_name=model_name)
         else:
             self.config = toml.load(config_path)
+        if scene.get("steps") is not None:  
+            steps = int(scene.get("steps"))
         sim_path = self.run_simulation(scene, config_path, steps=steps)
         metrics = self.evaluate(scene, sim_path, model_name, gt_path)
         return config_path, sim_path, metrics

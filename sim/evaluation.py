@@ -233,7 +233,7 @@ class TrajectoryEvaluator:
         goals: Optional[np.ndarray] = None,
         bounds: Optional[Tuple[float, float, float, float]] = None,
         *,
-        match_agents: bool = False,
+        match_agents: bool = True,
     ) -> Dict[str, float]:
         if pred.shape[0] < 2:
             raise ValueError("Need at least two timesteps for evaluation.")
