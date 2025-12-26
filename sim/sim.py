@@ -27,6 +27,9 @@ import csv
 
 import numpy as np
 import openai  
+from pathlib import Path
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "PySocialForce"))
 import pysocialforce as psf
 import toml
 from evaluation import TrajectoryEvaluator  
@@ -309,7 +312,6 @@ class SimulationRunner:
         np.savez_compressed(out_path, states=states, scene=scene)
         logger.info(f"Simulation complete: saved states to {out_path}")
         return out_path
-
 
     # ---- metrics ----
     def evaluate(self, scene: dict, states_path: Path, model_name: str, gt_path: Path = None) -> dict:
