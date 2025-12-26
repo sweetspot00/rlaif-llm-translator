@@ -257,7 +257,10 @@ class SimulationRunner:
         config_dict = toml.loads(config_text)
         self.config = config_dict
         self.min_distance = _coerce_float(response.get("min_distance"))
-        self.step_width = _coerce_float(self.config.get("scene", {}).get("step_width"), default=0.4)
+        if scene.get().get("step_width") is not None: # gt already has step_width
+            self.step_width = _coerce_float(scene.get().get("step_width"))
+        else:
+            self.step_width = _coerce_float(self.config.get("scene", {}).get("step_width"), default=0.4)
 
         scene_id = scene.get("scene_id", "scene")
         scene_idx = scene.get("scene_index")

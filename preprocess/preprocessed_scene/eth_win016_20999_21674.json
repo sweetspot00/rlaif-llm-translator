@@ -1,0 +1,69 @@
+{
+  "scene_id": "eth_win16_20999_21674",
+  "scene_index": 16,
+  "scenario": "A cold winter daytime scene on an ETH campus walkway: snow blankets the lawns while pedestrians funnel through a cleared central path. People mostly move straight through between building entrances and the upper concourse, creating a steady bidirectional ambulatory flow with frequent small detours and courteous avoidance.",
+  "category": "GT",
+  "crowd_size_label": "6",
+  "crowd_size": 6,
+  "ungrouped_agents": 6,
+  "event_center_px": [],
+  "event_center_m": [],
+  "goals_px": [],
+  "goals_m": [],
+  "initial_state": [
+    [
+      -21.836239377940977,
+      14.015818319145128,
+      0.0,
+      0.0,
+      -0.6071178845047296,
+      13.008282796672404
+    ],
+    [
+      -0.8141960936948074,
+      14.24093428438266,
+      0.0,
+      0.0,
+      -21.896009819839428,
+      12.064259576739332
+    ],
+    [
+      -0.7205154884351757,
+      12.861163611185024,
+      0.0,
+      0.0,
+      -10.634771149418015,
+      11.872007327692156
+    ],
+    [
+      -0.6936914738960365,
+      11.862650036181964,
+      0.0,
+      0.0,
+      -10.443338163141533,
+      11.160688077964556
+    ],
+    [
+      -22.006393412737722,
+      14.824728016688269,
+      0.0,
+      0.0,
+      -11.879554173559162,
+      13.860312386624466
+    ],
+    [
+      -22.439054920368513,
+      11.162358976864555,
+      0.0,
+      0.0,
+      -13.870799595068965,
+      12.856759316808837
+    ]
+  ],
+  "groups": [],
+  "assets": {
+    "anchored_obstacles": "preprocess/gt/gt_line_obstacles/eth_line_obstacles.npz",
+    "homography": "downloads/gt/eth/homography/seq_eth_H.txt"
+  },
+  "step_width": 0.2
+}
