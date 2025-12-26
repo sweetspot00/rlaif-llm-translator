@@ -1,0 +1,18 @@
+{
+  "metrics": {
+    "ADE": 0.23579651612425673,
+    "FDE": 0.43178431659873745,
+    "EMD": 0.43178431659873745,
+    "Kinem": 0.21477272663630761,
+    "CollisionRate": 0.03333333333333333,
+    "VD": 0.019305711526404076,
+    "DDS": 0.33333333333333337,
+    "GoalRate": "NaN",
+    "SocialDistanceViolations": 0.23333333333333334,
+    "AwayFromEventCenter": "NaN"
+  },
+  "states_path": "sim/results/simulations/sim_eth_win16_1092_1158_1766788058.npz",
+  "flow_heatmap_path": "sim/results/metrics/flow_0016_eth_win16_1092_1158_azure-gpt-5_1766788058.png",
+  "density_map_path": "sim/results/metrics/density_0016_eth_win16_1092_1158_azure-gpt-5_1766788058.png",
+  "trajectory_plot_path": "sim/results/metrics/traj_0016_eth_win16_1092_1158_azure-gpt-5_1766788058.png"
+}

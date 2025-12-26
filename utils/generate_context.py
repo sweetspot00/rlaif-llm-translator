@@ -25,6 +25,7 @@ You also need to give the following information based on the map and your scenar
 - event_center: None | Pixel coordinations on the map (need to specify coordinates) | Distribution if the event center is a range of area
 - goal_location: None | Random (need to specify how many goal locations) | Pixel coordinations on the map (need to specify coordinates) | Distribution if the goal location is a range of area
 - desired_speed: average desired speed of the crowd in m/s (considering the crowd context and the map size). Use for initial pedestrian state generation.
+- should_be_away_from_event_center: true | false (indicate whether people should be away from the event center, for example, in a violent event, the goal location should be far away from the event center)
 
 You must consider the relationship between goal and event center. for example, the event center is a violent explosion, the goal location should be far away from the event center.
 
@@ -83,6 +84,8 @@ goal_location: {
 "px_to_m": 0.471400264733
 }
 desired_speed: 0.6
+should_be_away_from_event_center: true
+
 
 Here's another example scenario description based on a map image of Times Square:
 scenario: "There an explosion occurred at zurich HB train station on Monday morning, causing a panic among the dense crowd of tourists and commuters trying to escape the area."
@@ -91,10 +94,15 @@ crowd_size: 100-500
 event_center: [200, 300]
 goal_location: Random (3)
 desired_speed: 1.2
+should_be_away_from_event_center: false
+
+
+CAUTION:
+!!!!GOAL SHOULD NOT BE CLOSE TO OBSTACLES (THE BLACK AREAS IN THE MAP) AND IT SHOULD BE WIDELY DISTRIBUTED IN ALL MAP AREAS!!
 
 Give back the result in a jsonl format, each line is a json object with the following keys:
 
-{"image":<image_name>, "scenario":<scenario>, "category":<category>, "crowd_size":<crowd_size>, "event_center":<event_center>, "goal_location":<goal_location>}
+{"image":<image_name>, "scenario":<scenario>, "category":<category>, "crowd_size":<crowd_size>, "event_center":<event_center>, "goal_location":<goal_location>, "desired_speed":<desired_speed>, "should_be_away_from_event_center":<should_be_away_from_event_center>}
 """
 
 

@@ -381,7 +381,25 @@ class SimulationRunner:
                 idx = np.arange(states_eval.shape[1]) % goals.shape[0]
                 goals = goals[idx]
             goals_ctx = goals
-        metrics = evaluator.evaluate(states_eval, gt=gt_eval, goals=goals_ctx)
+        event_center = scene.get("event_center_m") or scene.get("event_center")
+        event_center_ctx = None
+        if event_center is not None:
+            try:
+                event_center_arr = np.asarray(event_center, dtype=float).reshape(-1)
+                if event_center_arr.size >= 2:
+                    event_center_ctx = event_center_arr[:2]
+            except Exception:  # noqa: BLE001
+                event_center_ctx = None
+        should_be_away = scene.get("should_be_away_from_event_center")
+
+        metrics = evaluator.evaluate(
+            states_eval,
+            gt=gt_eval,
+            goals=goals_ctx,
+            bounds=None,
+            should_be_away_from_event_center=should_be_away,
+            event_center=event_center_ctx,
+        )
         ts = _timestamp()
         scene_idx = scene.get("scene_index")
         scene_tag = f"{scene_idx:04d}_{scene_id}" if isinstance(scene_idx, int) else scene_id

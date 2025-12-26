@@ -63,7 +63,8 @@ class TrajectoryEvaluator:
             "DDS",
             "GoalRate",
             # "Hausdorff",
-            "SocialDistanceViolations"
+            "SocialDistanceViolations",
+            "AwayFromEventCenter",
         )
     )
     result: Dict[str, float] = field(default_factory=dict, init=False)
@@ -187,6 +188,25 @@ class TrajectoryEvaluator:
         hist_gt = _histogram_density(gt, bounds, self.density_bins)
         return float(np.minimum(hist_pred, hist_gt).sum())
 
+    def _metric_away_from_event_center(self, pred: np.ndarray, _: Optional[np.ndarray], ctx: dict) -> float:
+        if not ctx.get("should_be_away_from_event_center"):
+            return np.nan
+        event_center = ctx.get("event_center")
+        if event_center is None:
+            return np.nan
+        center = np.asarray(event_center, dtype=float).reshape(-1)
+        if center.size < 2:
+            return np.nan
+        center = center[:2]
+        start = pred[0]
+        end = pred[-1]
+        start_dist = np.linalg.norm(start - center, axis=1)
+        end_dist = np.linalg.norm(end - center, axis=1)
+        if start_dist.size == 0:
+            return np.nan
+        moving_away = end_dist >= (start_dist - 1e-6)
+        return float(np.mean(moving_away))
+
     def _hausdorff(self, a: np.ndarray, b: np.ndarray) -> float:
         """Symmetric Hausdorff distance between two point sets (M,2) and (K,2)."""
         dists = _pairwise_distances(a, b)
@@ -224,7 +244,42 @@ class TrajectoryEvaluator:
         "DDS": _metric_dds,
         # "Hausdorff": _metric_hausdorff,
         "SocialDistanceViolations": _metric_social_distance_violations,
+        "AwayFromEventCenter": _metric_away_from_event_center,
     }
+
+    def _compute_distance_scale(
+        self, pred: np.ndarray, gt: Optional[np.ndarray], bounds: Optional[Tuple[float, float, float, float]]
+    ) -> float:
+        if bounds is not None:
+            x_min, x_max, y_min, y_max = bounds
+        else:
+            pts = [pred.reshape(-1, 2)]
+            if gt is not None:
+                pts.append(gt.reshape(-1, 2))
+            all_pos = np.concatenate(pts, axis=0)
+            x_min, y_min = np.nanmin(all_pos, axis=0)
+            x_max, y_max = np.nanmax(all_pos, axis=0)
+        diag = np.linalg.norm([x_max - x_min, y_max - y_min])
+        if not np.isfinite(diag) or diag <= 0:
+            diag = np.linalg.norm(pred[-1] - pred[0], axis=1).max(initial=1.0)
+        return float(max(diag, 1e-6))
+
+    def _scale_metric_value(self, name: str, value: float, ctx: dict) -> float:
+        if not np.isfinite(value):
+            return value
+        distance_scale = ctx["distance_scale"]
+        if name in {"ADE", "FDE", "EMD"}:
+            return float(np.clip(value / distance_scale, 0.0, 1.0))
+        if name == "Kinem":
+            speed_scale = distance_scale / self.dt
+            return float(np.clip(value / speed_scale, 0.0, 1.0))
+        if name == "VD":
+            ang_scale = (distance_scale / self.dt) ** 2
+            return float(np.clip(value / ang_scale, 0.0, 1.0))
+        if name in {"GoalRate", "CollisionRate", "DDS", "SocialDistanceViolations", "AwayFromEventCenter"}:
+            return float(np.clip(value, 0.0, 1.0))
+        # Fallback normalization keeps the metric bounded without changing ordering.
+        return float(np.clip(value / (value + distance_scale), 0.0, 1.0))
 
     def evaluate(
         self,
@@ -232,6 +287,8 @@ class TrajectoryEvaluator:
         gt: Optional[np.ndarray] = None,
         goals: Optional[np.ndarray] = None,
         bounds: Optional[Tuple[float, float, float, float]] = None,
+        should_be_away_from_event_center: Optional[bool] = None,
+        event_center: Optional[np.ndarray] = None,
         *,
         match_agents: bool = True,
     ) -> Dict[str, float]:
@@ -246,7 +303,15 @@ class TrajectoryEvaluator:
         if match_agents and gt is not None:
             pred, gt, perm = self._align_by_hungarian_final(pred, gt)
 
-        ctx = {"goals": goals, "bounds": bounds, "perm": perm}
+        distance_scale = self._compute_distance_scale(pred, gt, bounds)
+        ctx = {
+            "goals": goals,
+            "bounds": bounds,
+            "perm": perm,
+            "event_center": event_center,
+            "should_be_away_from_event_center": should_be_away_from_event_center,
+            "distance_scale": distance_scale,
+        }
         out: Dict[str, float] = {}
 
         requires_gt = {
@@ -260,6 +325,7 @@ class TrajectoryEvaluator:
             "DDS": True,
             "Hausdorff": False,  # can run pred-only (pairwise) or pred-vs-gt
             "SocialDistanceViolations": False,
+            "AwayFromEventCenter": False,
         }
 
         for name in self.metrics:
@@ -269,7 +335,8 @@ class TrajectoryEvaluator:
             if requires_gt.get(name, False) and gt is None:
                 out[name] = np.nan
                 continue
-            out[name] = func(self, pred, gt, ctx)
+            raw_value = func(self, pred, gt, ctx)
+            out[name] = self._scale_metric_value(name, raw_value, ctx)
 
         self.result = out
         return out
