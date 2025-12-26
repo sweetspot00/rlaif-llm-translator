@@ -17,14 +17,11 @@ Window sizing:
 from __future__ import annotations
 
 import argparse
-import csv
 import json
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Callable
 
 import numpy as np
-
-from convert_obstacle_to_meter import load_homography, pixel_to_meter_factory
 
 
 def load_prompt(prompt_file: Path, scene_key: str) -> str:
@@ -49,29 +46,53 @@ def _convert_px_to_m(px_to_m, points_px: np.ndarray) -> np.ndarray:
     return anchored
 
 
-def read_trajectories(csv_path: Path) -> dict[str, list[tuple[int, float, float]]]:
-    agents: dict[str, list[tuple[int, float, float]]] = {}
-    with csv_path.open("r", newline="") as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            aid = row["agent_id"]
-            frame = int(row["frame"])
-            x, y = float(row["x"]), float(row["y"])
-            agents.setdefault(aid, []).append((frame, x, y))
-    # sort per agent
+def read_trajectories_obsmat(obsmat_path: Path) -> dict[str, list[tuple[int, float, float, float, float]]]:
+    """
+    obsmat.txt format: time/frame, ped_id, world_x, ?, world_y, vel_y, acc_x, acc_y (meters).
+    We round the time column to int frames for windowing. Positions use col 2 (x) and col 4 (y),
+    velocities use col 5 (vx) and col 7 (vy).
+    """
+    agents: dict[str, list[tuple[int, float, float, float, float]]] = {}
+    with obsmat_path.open("r") as f:
+        for line in f:
+            parts = line.strip().split()
+            if len(parts) < 8:
+                continue
+            t = int(round(float(parts[0])))
+            pid = parts[1]
+            x = float(parts[2])
+            y = float(parts[4])
+            vx = float(parts[5])
+            vy = float(parts[7])
+            agents.setdefault(pid, []).append((t, x, y, vx, vy))
     for v in agents.values():
         v.sort(key=lambda t: t[0])
     return agents
 
 
-def build_windows(
-    agents: dict[str, list[tuple[int, float, float]]], base_size: int, min_agents: int
+def build_windows_greedy(
+    agents: dict[str, list[tuple[int, float, float, float, float]]],
+    base_size: int,
+    min_agents: int,
+    synchronized: bool = False,
 ) -> list[tuple[int, int, list[str]]]:
     """
-    Returns list of (start, end, agent_ids) windows.
-    Windows are built over the start frames.
+    Greedy windows over agent start frames. When synchronized=True, group agents with identical
+    start frames; otherwise expand to include starts until min_agents.
     """
-    starts = sorted((min(fr for fr, _, _ in traj), aid) for aid, traj in agents.items())
+    starts = sorted((min(item[0] for item in traj), aid) for aid, traj in agents.items())
+    if synchronized:
+        by_start: dict[int, list[str]] = {}
+        for sf, aid in starts:
+            by_start.setdefault(sf, []).append(aid)
+        windows: list[tuple[int, int, list[str]]] = []
+        for sf in sorted(by_start.keys()):
+            aids = by_start[sf]
+            if len(aids) < min_agents:
+                continue
+            windows.append((sf, sf + base_size - 1, aids))
+        return windows
+
     idx = 0
     windows: list[tuple[int, int, list[str]]] = []
     n = len(starts)
@@ -94,9 +115,57 @@ def build_windows(
     return windows
 
 
+def build_windows_sliding(
+    agents: dict[str, list[tuple[int, float, float, float, float]]],
+    total_len: int,
+    stride: int,
+    min_agents: int,
+) -> list[tuple[int, int, list[str]]]:
+    """
+    Sliding fixed-length windows over time. Collect agents that have observations for every frame in the window.
+    total_len = T_obs + T_pred. stride can be 1 for fully overlapping windows.
+    """
+    # derive frame step from data (min positive delta)
+    frame_maps: dict[str, dict[int, tuple[float, float, float, float]]] = {}
+    all_frames: list[int] = []
+    min_step = None
+    for aid, traj in agents.items():
+        fm: dict[int, tuple[float, float, float, float]] = {}
+        last = None
+        for fr, x, y, vx, vy in traj:
+            fr_i = int(round(fr))
+            fm[fr_i] = (x, y, vx, vy)
+            if last is not None:
+                delta = fr_i - last
+                if delta > 0:
+                    min_step = delta if min_step is None else min(min_step, delta)
+            last = fr_i
+            all_frames.append(fr_i)
+        frame_maps[aid] = fm
+    if not all_frames:
+        return []
+    if min_step is None or min_step <= 0:
+        min_step = 1
+    min_fr, max_fr = min(all_frames), max(all_frames)
+    windows: list[tuple[int, int, list[str]]] = []
+    start = min_fr
+    stride_frames = stride * min_step
+    while start + (total_len - 1) * min_step <= max_fr:
+        end = start + (total_len - 1) * min_step
+        agents_full: list[str] = []
+        required_frames = [start + k * min_step for k in range(total_len)]
+        for aid, fm in frame_maps.items():
+            if all(fr in fm for fr in required_frames):
+                agents_full.append(aid)
+        if len(agents_full) >= min_agents:
+            windows.append((start, end, agents_full))
+        start += stride_frames
+    return windows
+
+
 def initial_state_for_window(
     agent_ids: list[str],
-    agents: dict[str, list[tuple[int, float, float]]],
+    agents: dict[str, list[tuple[int, float, float, float, float]]],
     frame_start: int,
     frame_end: int,
     px_to_m,
@@ -105,13 +174,13 @@ def initial_state_for_window(
     for aid in agent_ids:
         traj = agents[aid]
         # filter frames inside window
-        in_window = [(f, x, y) for f, x, y in traj if frame_start <= f <= frame_end]
+        in_window = [(f, x, y, vx, vy) for f, x, y, vx, vy in traj if frame_start <= f <= frame_end]
         if not in_window:
             continue
-        f0, x0, y0 = in_window[0]
-        f_last, x1, y1 = in_window[-1]
+        f0, x0, y0, vx0, vy0 = in_window[0]
+        f_last, x1, y1, _, _ = in_window[-1]
         (mx0, my0), (mx1, my1) = _convert_px_to_m(px_to_m, np.array([[x0, y0], [x1, y1]]))
-        rows.append([mx0, my0, 0.0, 0.0, mx1, my1])
+        rows.append([mx0, my0, vx0, vy0, mx1, my1])
     return np.asarray(rows, dtype=float)
 
 
@@ -150,76 +219,54 @@ def make_scene_payload(
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Build per-window preprocessed scenes from dense GT trajectories.")
     p.add_argument("--scene", default="eth", help="Scene key (used in ids and prompt lookup).")
-    p.add_argument(
-        "--trajectory",
-        type=Path,
-        default=Path("downloads/gt/eth/trajectory_dense/seq_eth_trajectory_dense.csv"),
-        help="Dense trajectory CSV path.",
-    )
-    p.add_argument(
-        "--prompt-file",
-        type=Path,
-        default=Path("preprocess/gt/gt_scene/eth_prompt.txt"),
-        help="Prompt text file (single prompt or keyed CSV-style).",
-    )
-    p.add_argument(
-        "--homography",
-        type=Path,
-        default=Path("downloads/gt/eth/homography/seq_eth_H.txt"),
-        help="Homography TXT path.",
-    )
-    p.add_argument(
-        "--info-json",
-        type=Path,
-        default=Path("downloads/gt/eth/information/seq_eth_info.json"),
-        help="Information JSON with height/width.",
-    )
-    p.add_argument(
-        "--anchored-obstacles",
-        type=Path,
-        default=Path("preprocess/gt/gt_line_obstacles/eth_line_obstacles.npz"),
-        help="Anchored obstacles NPZ path.",
-    )
+    p.add_argument("--prompt-file", type=Path, default=None, help="Prompt text file; defaults to preprocess/gt/gt_scene/<scene>_prompt.txt")
+    p.add_argument("--homography", type=Path, default=None, help="Homography TXT path; defaults to downloads/gt/<scene>/obstacle/H.txt")
+    p.add_argument("--anchored-obstacles", type=Path, default=None, help="Anchored obstacles NPZ path; defaults to preprocess/gt/gt_line_obstacles/<scene>_line_obstacles.npz")
     p.add_argument("--window-size", type=int, default=300, help="Base window size in frames.")
     p.add_argument("--min-agents", type=int, default=20, help="Minimum agents per window.")
+    p.add_argument(
+        "--synchronized-starts",
+        action="store_true",
+        help="If set, each window includes only agents sharing the same start frame.",
+    )
+    p.add_argument(
+        "--sliding-window",
+        action="store_true",
+        help="Use sliding windows over time (agents must be present for obs+pred frames).",
+    )
+    p.add_argument("--obs-frames", type=int, default=8, help="Observed frames length for sliding windows.")
+    p.add_argument("--pred-frames", type=int, default=12, help="Prediction frames length for sliding windows.")
+    p.add_argument("--window-stride", type=int, default=1, help="Stride for sliding windows.")
     p.add_argument(
         "--out-dir",
         type=Path,
         default=Path("preprocess/preprocessed_scene"),
         help="Directory to write windowed scene JSONs.",
     )
-    p.add_argument(
-        "--gt-split-dir",
-        type=Path,
-        default=Path("downloads/gt/eth/trajectory_dense_windows"),
-        help="Directory to write per-window dense GT CSV slices (frames shifted to window start).",
-    )
-    p.add_argument(
-        "--no-gt-splits",
-        action="store_true",
-        help="Skip writing per-window GT CSV slices.",
-    )
     return p.parse_args()
 
 
 def main() -> None:
     args = parse_args()
-    prompt = load_prompt(args.prompt_file, args.scene)
+    scene_key = args.scene
+    prompt_path = args.prompt_file or Path(f"downloads/gt/{scene_key}/obstacle/prompt.txt")
+    homography_path = args.homography or Path(f"downloads/gt/{scene_key}/obstacle/H.txt")
+    anchored_path = args.anchored_obstacles or Path(f"preprocess/gt/gt_line_obstacles/{scene_key}_line_obstacles.npz")
+    obsmat_path = Path(f"downloads/gt/{scene_key}/obstacle/obsmat.txt")
 
-    with args.info_json.open("r", encoding="utf-8") as f:
-        info = json.load(f)
-    height = info.get("height")
-    if height is None:
-        raise ValueError(f"'height' missing in {args.info_json}")
-    H = load_homography(args.homography)
-    px_to_m = pixel_to_meter_factory(H, origin_px=(0.0, float(height)))
+    prompt = load_prompt(prompt_path, scene_key)
 
-    agents = read_trajectories(args.trajectory)
-    windows = build_windows(agents, args.window_size, args.min_agents)
+    if not obsmat_path.exists():
+        raise FileNotFoundError(f"obsmat not found at {obsmat_path}")
+    agents = read_trajectories_obsmat(obsmat_path)
+    px_to_m: Callable[[np.ndarray], np.ndarray] = lambda pts: np.asarray(pts, dtype=float)
+    if args.sliding_window:
+        total_len = args.obs_frames + args.pred_frames
+        windows = build_windows_sliding(agents, total_len, args.window_stride, args.min_agents)
+    else:
+        windows = build_windows_greedy(agents, args.window_size, args.min_agents, synchronized=args.synchronized_starts)
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
-    if not args.no_gt_splits:
-        args.gt_split_dir.mkdir(parents=True, exist_ok=True)
     for idx, (f_start, f_end, agent_ids) in enumerate(windows):
         init_state = initial_state_for_window(agent_ids, agents, f_start, f_end, px_to_m)
         if init_state.shape[0] == 0:
@@ -231,23 +278,12 @@ def main() -> None:
             frame_end=f_end,
             initial_state=init_state,
             prompt=prompt,
-            anchored_obstacles=args.anchored_obstacles,
-            homography=args.homography,
+            anchored_obstacles=anchored_path,
+            homography=homography_path,
         )
         out_path = args.out_dir / f"{args.scene}_win{idx:03d}_{f_start}_{f_end}.json"
         out_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
         print(f"Wrote {out_path} (agents={init_state.shape[0]})")
-        if not args.no_gt_splits:
-            gt_csv = args.gt_split_dir / f"{args.scene}_win{idx:03d}_{f_start}_{f_end}.csv"
-            with gt_csv.open("w", newline="") as f:
-                writer = csv.writer(f)
-                writer.writerow(["scene", "agent_id", "agent_type", "frame", "x", "y"])
-                for aid in agent_ids:
-                    for frame, x, y in agents[aid]:
-                        if frame < f_start or frame > f_end:
-                            continue
-                        writer.writerow(["seq_eth", aid, "0", frame - f_start, x, y])
-            print(f"Wrote GT slice {gt_csv}")
 
 
 if __name__ == "__main__":
