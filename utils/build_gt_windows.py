@@ -1,5 +1,5 @@
 """
-Slice GT dense trajectories into start-frame windows and emit separate preprocessed JSONs.
+Slice GT trajectories into start-frame windows and emit separate preprocessed JSONs.
 
 For each window:
 - select agents whose first frame lies in [window_start, window_end]
@@ -17,6 +17,7 @@ Window sizing:
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 from pathlib import Path
 from typing import Dict, List, Tuple, Callable
@@ -217,7 +218,7 @@ def make_scene_payload(
 
 
 def parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(description="Build per-window preprocessed scenes from dense GT trajectories.")
+    p = argparse.ArgumentParser(description="Build per-window preprocessed scenes from GT trajectories.(obsmat.txt)")
     p.add_argument("--scene", default="eth", help="Scene key (used in ids and prompt lookup).")
     p.add_argument("--prompt-file", type=Path, default=None, help="Prompt text file; defaults to preprocess/gt/gt_scene/<scene>_prompt.txt")
     p.add_argument("--homography", type=Path, default=None, help="Homography TXT path; defaults to downloads/gt/<scene>/obstacle/H.txt")
@@ -234,9 +235,19 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Use sliding windows over time (agents must be present for obs+pred frames).",
     )
-    p.add_argument("--obs-frames", type=int, default=8, help="Observed frames length for sliding windows.")
-    p.add_argument("--pred-frames", type=int, default=12, help="Prediction frames length for sliding windows.")
+    p.add_argument("--total-frames", type=int, default=20, help="Total frames per sliding window (obs+pred).")
     p.add_argument("--window-stride", type=int, default=1, help="Stride for sliding windows.")
+    p.add_argument(
+        "--write-gt",
+        action="store_true",
+        help="Also write per-window GT slices (CSV with frame shifted to window start).",
+    )
+    p.add_argument(
+        "--gt-dir",
+        type=Path,
+        default=None,
+        help="Directory for GT slices; defaults to downloads/gt/<scene>/trajectory_windows.",
+    )
     p.add_argument(
         "--out-dir",
         type=Path,
@@ -253,6 +264,7 @@ def main() -> None:
     homography_path = args.homography or Path(f"downloads/gt/{scene_key}/obstacle/H.txt")
     anchored_path = args.anchored_obstacles or Path(f"preprocess/gt/gt_line_obstacles/{scene_key}_line_obstacles.npz")
     obsmat_path = Path(f"downloads/gt/{scene_key}/obstacle/obsmat.txt")
+    gt_dir = args.gt_dir or Path(f"downloads/gt/{scene_key}/trajectory_windows")
 
     prompt = load_prompt(prompt_path, scene_key)
 
@@ -261,12 +273,14 @@ def main() -> None:
     agents = read_trajectories_obsmat(obsmat_path)
     px_to_m: Callable[[np.ndarray], np.ndarray] = lambda pts: np.asarray(pts, dtype=float)
     if args.sliding_window:
-        total_len = args.obs_frames + args.pred_frames
+        total_len = args.total_frames
         windows = build_windows_sliding(agents, total_len, args.window_stride, args.min_agents)
     else:
         windows = build_windows_greedy(agents, args.window_size, args.min_agents, synchronized=args.synchronized_starts)
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
+    if args.write_gt:
+        gt_dir.mkdir(parents=True, exist_ok=True)
     for idx, (f_start, f_end, agent_ids) in enumerate(windows):
         init_state = initial_state_for_window(agent_ids, agents, f_start, f_end, px_to_m)
         if init_state.shape[0] == 0:
@@ -284,6 +298,17 @@ def main() -> None:
         out_path = args.out_dir / f"{args.scene}_win{idx:03d}_{f_start}_{f_end}.json"
         out_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
         print(f"Wrote {out_path} (agents={init_state.shape[0]})")
+        if args.write_gt:
+            gt_csv = gt_dir / f"{args.scene}_win{idx:03d}_{f_start}_{f_end}.csv"
+            with gt_csv.open("w", newline="") as f:
+                writer = csv.writer(f)
+                writer.writerow(["scene", "agent_id", "agent_type", "frame", "x", "y"])
+                for aid in agent_ids:
+                    for frame, x, y, _, _ in agents[aid]:
+                        if frame < f_start or frame > f_end:
+                            continue
+                        writer.writerow([args.scene, aid, "0", frame - f_start, x, y])
+            print(f"Wrote GT slice {gt_csv}")
 
 
 if __name__ == "__main__":
