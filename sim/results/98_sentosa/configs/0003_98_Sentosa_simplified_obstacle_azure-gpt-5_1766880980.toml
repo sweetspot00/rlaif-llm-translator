@@ -1,0 +1,57 @@
+title = "Guided Wheelchair Tour: North Drop-off to South Sea-view Terrace"
+
+[scene]
+enable_group = true
+agent_radius = 0.45
+step_width = 0.5
+max_speed_multiplier = 1.1
+tau = 0.6
+resolution = 1
+
+[goal_attractive_force]
+factor = 0.9
+
+[ped_repulsive_force]
+factor = 1.9
+v0 = 2.2
+sigma = 0.35
+fov_phi = 120.0
+fov_factor = 0.6
+
+[space_repulsive_force]
+factor = 1.2
+u0 = 12
+r = 0.3
+
+[group_coherence_force]
+factor = 4.0
+
+[group_repulsive_force]
+factor = 0.6
+threshold = 0.45
+
+[group_gaze_force]
+factor = 3.5
+fov_phi = 90.0
+
+[desired_force]
+factor = 0.9
+relaxation_time = 0.7
+goal_threshold = 0.3
+
+[social_force]
+factor = 5.0
+lambda_importance = 2.5
+gamma = 0.30
+n = 2
+n_prime = 3
+
+[obstacle_force]
+factor = 12.0
+sigma = 0.25
+threshold = 4.0
+
+[along_wall_force]
+
+[explanation]
+# The tour is slow-moving and cohesive, with wheelchairs and escorts traveling together from north to south. A larger agent_radius (0.45 m) approximates wheelchair footprint and side-by-side pacing. Reduced max_speed_multiplier (1.1), a slightly longer scene tau (0.6), and desired_force relaxation_time (0.7) temper accelerations to reflect guided, steady motion. Strong group_coherence (4.0) and moderate group_gaze (3.5) keep escorts close to wheelchairs and maintain formation, while a reduced group_repulsive factor (0.6) and smaller intra-group threshold (0.45) allow closer spacing within the tour. Pedestrian repulsion is strengthened (factor 1.9, v0 2.2) with a wider FOV (120°) to ensure comfortable interpersonal distances around wheelchairs. Obstacle avoidance is increased (factor 12.0, threshold 4.0) so the group anticipates curbs/edges and navigates safely toward the southern terrace. Resolution set to 1 m/unit matches the scene scale; goal and desired force factors are slightly reduced to encourage smooth, unhurried progress.

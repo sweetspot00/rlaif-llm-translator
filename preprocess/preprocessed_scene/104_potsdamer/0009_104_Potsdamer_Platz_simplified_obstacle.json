@@ -1,0 +1,116 @@
+{
+  "scene_id": "104_Potsdamer_Platz_simplified_obstacle",
+  "scene_index": 9,
+  "scenario": "Assisted evacuation drill: stewards guide a small group with mixed mobility southward, then to safe waiting areas at the edges.",
+  "category": "Disability",
+  "crowd_size_label": "0-50",
+  "crowd_size": 6,
+  "ungrouped_agents": 4,
+  "event_center_px": [
+    480.0,
+    520.0
+  ],
+  "event_center_m": [
+    174.45803889399394,
+    29.076339815743268
+  ],
+  "goal_location_raw": {
+    "type": "pixels",
+    "points": [
+      [
+        60,
+        300
+      ],
+      [
+        620,
+        300
+      ],
+      [
+        90,
+        20
+      ],
+      [
+        600,
+        20
+      ],
+      [
+        620,
+        560
+      ]
+    ]
+  },
+  "goals_px": [
+    [
+      480.0,
+      520.0
+    ]
+  ],
+  "goals_m": [
+    [
+      174.45803889399394,
+      29.076339815743268
+    ]
+  ],
+  "initial_state": [
+    [
+      186.8154833158478,
+      103.22100634593517,
+      -0.11507929111515651,
+      -0.6904757466822662,
+      174.45803889399394,
+      29.076339815743268
+    ],
+    [
+      141.38370235380717,
+      148.65278730727732,
+      0.18661023817674674,
+      -0.6746677841779744,
+      174.45803889399394,
+      29.076339815743268
+    ],
+    [
+      178.45603561867028,
+      38.52615025546402,
+      -0.272747993596052,
+      -0.6446770757436067,
+      174.45803889399394,
+      29.076339815743268
+    ],
+    [
+      96.67882988718338,
+      17.44580388907343,
+      0.6923028327991166,
+      0.10352191892695109,
+      174.45803889399394,
+      29.076339815743268
+    ],
+    [
+      54.51813715440221,
+      202.80747021455318,
+      0.3976946406442863,
+      -0.5760546612977034,
+      174.45803889399394,
+      29.076339815743268
+    ],
+    [
+      200.26329048047774,
+      21.080346366390586,
+      -0.6686367572321904,
+      0.20718322055132937,
+      174.45803889399394,
+      29.076339815743268
+    ]
+  ],
+  "groups": [
+    [
+      3,
+      4
+    ]
+  ],
+  "towards_event": "false",
+  "assets": {
+    "obstacle_png": "downloads/maps/simplified_obstacles/104_Potsdamer_Platz_simplified_obstacle.png",
+    "homography": "downloads/google_maps/homographies/104_Potsdamer_Platz_simplified_obstacle.txt",
+    "anchored_obstacles": "preprocess/pysfm_obstacles_meter_close_shape/104_Potsdamer_Platz_simplified_obstacle_anchored.npz"
+  }
+}

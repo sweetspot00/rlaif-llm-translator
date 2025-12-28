@@ -1,0 +1,68 @@
+title = "Sentosa Early-Evening Promenade Strolls"
+
+[scene]
+enable_group = true
+agent_radius = 0.35
+step_width = 0.4
+max_speed_multiplier = 1.1
+tau = 0.7
+resolution = 1
+
+[goal_attractive_force]
+factor = 0.85
+
+[ped_repulsive_force]
+factor = 1.2
+v0 = 1.8
+sigma = 0.35
+# fov params
+fov_phi = 110.0
+fov_factor = 0.3
+
+[space_repulsive_force]
+factor = 0.8
+u0 = 8
+r = 0.3
+
+[group_coherence_force]
+factor = 4.5
+
+[group_repulsive_force]
+factor = 0.8
+threshold = 0.5
+
+[group_gaze_force]
+factor = 5.0
+# fov params
+fov_phi = 100.0
+
+[desired_force]
+factor = 0.9
+relaxation_time = 0.7
+goal_threshold = 0.5
+
+[social_force]
+factor = 4.5
+lambda_importance = 2.0
+gamma = 0.35
+n = 2
+n_prime = 3
+
+[obstacle_force]
+factor = 6.0
+sigma = 0.25
+threshold = 2.5
+
+[along_wall_force]
+factor = 0.3
+
+[explanation]
+text = """
+Early-evening plaza strolling implies low desired pace and gentle interactions. We reduce direct goal drive (goal_attractive_force=0.85, desired_force.factor=0.9) and cap speeds (max_speed_multiplier=1.1) with slower adaptations (tau=0.7, relaxation_time=0.7) to reflect meandering and photo stops (larger goal_threshold=0.5 so agents settle without oscillation).
+
+Families move in groups, so we enhance cohesion and mutual orientation (group_coherence_force=4.5, group_gaze_force=5.0) while allowing closer within-group spacing (group_repulsive_force.factor=0.8, threshold=0.5).
+
+The open plaza has few tight constraints, so we soften space/obstacle effects (space_repulsive_force.factor=0.8; obstacle_force.factor=6.0, sigma=0.25, threshold=2.5). Pedestrian avoidance is smoother and anticipatory rather than abrupt (ped_repulsive_force.factor=1.2, v0=1.8, sigma=0.35). A modestly wide FOV (110°) with low out-of-view reaction (0.3) matches casual attention where people are less responsive to rear approaches.
+
+Resolution = 1 follows the 1 m per unit scale. Along-wall tendency is mild (along_wall_force.factor=0.3) to reflect window-shopping near edges without strong channeling.
+"""

@@ -1,0 +1,55 @@
+title = "Edgy crowd around confrontation — ring formation and drift-away"
+
+[scene]
+enable_group = true
+agent_radius = 0.36
+step_width = 0.3
+max_speed_multiplier = 1.2
+tau = 0.4
+resolution = 1
+
+[goal_attractive_force]
+factor = 0.85
+
+[ped_repulsive_force]
+factor = 2.2
+v0 = 2.6
+sigma = 0.4
+fov_phi = 150.0
+fov_factor = 0.7
+
+[space_repulsive_force]
+factor = 1.2
+u0 = 12.0
+r = 0.25
+
+[group_coherence_force]
+factor = 1.8
+
+[group_repulsive_force]
+factor = 1.2
+threshold = 0.7
+
+[group_gaze_force]
+factor = 3.0
+fov_phi = 100.0
+
+[desired_force]
+factor = 0.9
+relaxation_time = 0.4
+goal_threshold = 0.25
+
+[social_force]
+factor = 5.8
+lambda_importance = 2.2
+gamma = 0.45
+n = 3
+n_prime = 3
+
+[obstacle_force]
+factor = 12.0
+sigma = 0.3
+threshold = 5.0
+
+[along_wall_force]
+factor = 0.5

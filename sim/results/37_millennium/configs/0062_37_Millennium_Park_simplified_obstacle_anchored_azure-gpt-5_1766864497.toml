@@ -1,0 +1,55 @@
+title = "West Plaza Meet-and-Greet Queue (slow crawl)"
+
+[scene]
+enable_group = true
+agent_radius = 0.32
+step_width = 0.4
+max_speed_multiplier = 1.1
+tau = 0.7
+resolution = 1
+
+[goal_attractive_force]
+factor = 0.85
+
+[ped_repulsive_force]
+factor = 1.8
+v0 = 2.2
+sigma = 0.25
+fov_phi = 120.0
+fov_factor = 0.3
+
+[space_repulsive_force]
+factor = 1.2
+u0 = 10
+r = 0.2
+
+[group_coherence_force]
+factor = 2.5
+
+[group_repulsive_force]
+factor = 0.8
+threshold = 0.5
+
+[group_gaze_force]
+factor = 3.0
+fov_phi = 90.0
+
+[desired_force]
+factor = 0.9
+relaxation_time = 0.9
+goal_threshold = 0.2
+
+[social_force]
+factor = 5.0
+lambda_importance = 2.5
+gamma = 0.5
+n = 2
+n_prime = 3
+
+[obstacle_force]
+factor = 12.0
+sigma = 0.2
+threshold = 3.0
+
+[along_wall_force]
+factor = 0.6

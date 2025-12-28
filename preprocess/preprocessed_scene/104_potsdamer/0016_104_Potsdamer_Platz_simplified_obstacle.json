@@ -1,0 +1,103 @@
+{
+  "scene_id": "104_Potsdamer_Platz_simplified_obstacle",
+  "scene_index": 16,
+  "scenario": "Street musician draws a crowd near the mid-east walkway; people cluster to watch, then peel off toward exits.",
+  "category": "Expressive",
+  "crowd_size_label": "0-50",
+  "crowd_size": 5,
+  "ungrouped_agents": 5,
+  "event_center_px": [
+    580.0,
+    300.0
+  ],
+  "event_center_m": [
+    210.80346366367303,
+    109.03627430927008
+  ],
+  "goal_location_raw": {
+    "type": "pixels",
+    "points": [
+      [
+        580,
+        300
+      ],
+      [
+        90,
+        20
+      ],
+      [
+        60,
+        300
+      ],
+      [
+        420,
+        580
+      ],
+      [
+        620,
+        560
+      ]
+    ]
+  },
+  "goals_px": [
+    [
+      580.0,
+      300.0
+    ]
+  ],
+  "goals_m": [
+    [
+      210.80346366367303,
+      109.03627430927008
+    ]
+  ],
+  "initial_state": [
+    [
+      199.53638198506087,
+      175.18494738917798,
+      0.10074680798734952,
+      -0.5914812597879666,
+      210.80346366367303,
+      109.03627430927008
+    ],
+    [
+      81.05029723630287,
+      208.98619242478162,
+      0.47532680366889424,
+      -0.36614809806130694,
+      210.80346366367303,
+      109.03627430927008
+    ],
+    [
+      22.534163357224315,
+      149.37969580292702,
+      0.5866814484468172,
+      -0.12571745323678984,
+      210.80346366367303,
+      109.03627430927008
+    ],
+    [
+      7.995993449352682,
+      150.1066042985767,
+      0.5880629590680815,
+      -0.11908801859167828,
+      210.80346366367303,
+      109.03627430927008
+    ],
+    [
+      49.793231934309006,
+      189.35966304969043,
+      0.5368984877312811,
+      -0.2678432636298016,
+      210.80346366367303,
+      109.03627430927008
+    ]
+  ],
+  "groups": [],
+  "towards_event": "true",
+  "assets": {
+    "obstacle_png": "downloads/maps/simplified_obstacles/104_Potsdamer_Platz_simplified_obstacle.png",
+    "homography": "downloads/google_maps/homographies/104_Potsdamer_Platz_simplified_obstacle.txt",
+    "anchored_obstacles": "preprocess/pysfm_obstacles_meter_close_shape/104_Potsdamer_Platz_simplified_obstacle_anchored.npz"
+  }
+}

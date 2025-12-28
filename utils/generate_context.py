@@ -18,16 +18,18 @@ You need to generate the a desctription of the crowd scenario/event that falls i
 - Rushing 
 - Violent 
 
-
 You also need to give the following information based on the map and your scenario:
 
 - crowd_size: 0-50 ｜ 50-100 | 100-500 | 500-1000 | 1000+ (THE MAP SIZE is FIXED (width ≈ 301.7 m, height ≈ 282.8 m)need to consider the size of the map, the event could be large but the map is small, so the crowd size should be small accordingly)
 - event_center: None | Pixel coordinations on the map (need to specify coordinates) | Distribution if the event center is a range of area
-- goal_location: None | Random (need to specify how many goal locations) | Pixel coordinations on the map (need to specify coordinates) | Distribution if the goal location is a range of area
+- goal_location: None | Random (need to specify how many goal locations) | Pixel coordinations on the map (need to specify coordinates) | Distribution if the goal location is a range of area, the goal must be walkable area (not on obstacles)only the white area on the map
 - desired_speed: average desired speed of the crowd in m/s (considering the crowd context and the map size). Use for initial pedestrian state generation.
-- should_be_away_from_event_center: true | false (indicate whether people should be away from the event center, for example, in a violent event, the goal location should be far away from the event center)
+- towards_event: true | false | random (indicate whether people are moving towards the event center or away from it. Random means does not matter. If event_center is None, set this to random)
+- goal_sample_strategy: nearest | random (indicate how to assign agent the goals if goal is not None. If goal_location is None, set this to random)
 
-You must consider the relationship between goal and event center. for example, the event center is a violent explosion, the goal location should be far away from the event center.
+You must consider the relationship between goal and event center. 
+for example, the event center is a violent explosion, the goal location should be far away from the event center.
+ALSO, IF TOWARDS_EVENT IS FALSE, THE GOAL LOCATION SHOULD BE FAR AWAY FROM THE EVENT CENTER. YOUR'll need to sample THE GOAL LOCATION ACCORDINGLY.
 
 Here's an example scenario description based on a map image of Berkeley Statium:
 
@@ -46,35 +48,30 @@ goal_location: {
 "type": "gaussian_mixture_truncated_to_walkable",
 "components": [
     {
-    "name": "entering_to_event_center",
     "weight": 0.45,
     "mean_px": [445, 218],
     "sigma_px": [22, 18],
     "support_radius_px": 60
     },
     {
-    "name": "north_crosswalk",
     "weight": 0.18,
     "mean_px": [320, 40],
     "sigma_px": [26, 22],
     "support_radius_px": 70
     },
     {
-    "name": "south_crosswalk",
     "weight": 0.18,
     "mean_px": [320, 565],
     "sigma_px": [26, 22],
     "support_radius_px": 70
     },
     {
-    "name": "west_parking_campus_dispersal",
     "weight": 0.10,
     "mean_px": [120, 330],
     "sigma_px": [30, 26],
     "support_radius_px": 80
     },
     {
-    "name": "west_south_path_junction",
     "weight": 0.09,
     "mean_px": [160, 520],
     "sigma_px": [30, 26],
@@ -84,7 +81,8 @@ goal_location: {
 "px_to_m": 0.471400264733
 }
 desired_speed: 0.6
-should_be_away_from_event_center: true
+towards_event: true
+goal_strategy: random
 
 
 Here's another example scenario description based on a map image of Times Square:
@@ -93,8 +91,9 @@ category: Violent
 crowd_size: 100-500
 event_center: [200, 300]
 goal_location: Random (3)
+goal_strategy: nearest
 desired_speed: 1.2
-should_be_away_from_event_center: false
+towards_event: false 
 
 
 CAUTION:
@@ -102,9 +101,8 @@ CAUTION:
 
 Give back the result in a jsonl format, each line is a json object with the following keys:
 
-{"image":<image_name>, "scenario":<scenario>, "category":<category>, "crowd_size":<crowd_size>, "event_center":<event_center>, "goal_location":<goal_location>, "desired_speed":<desired_speed>, "should_be_away_from_event_center":<should_be_away_from_event_center>}
+{"image":<image_name>, "scenario":<scenario>, "category":<category>, "crowd_size":<crowd_size>, "event_center":<event_center>, "goal_location":<goal_location>, "desired_speed":<desired_speed>, "towards_event":<towards_event>}
 """
-
 
 
 import argparse

@@ -33,6 +33,7 @@ import toml
 from evaluation import TrajectoryEvaluator  
 from sim_traj_plot import plot_trajectory
 from utils.convert_obstacle_to_meter import load_homography, pixel_to_meter_factory
+from tqdm import tqdm
 
 logger = logging.getLogger(__name__)
 # Reduce noisy debug logging from dependencies.
@@ -50,8 +51,7 @@ and You'll need to think about how to simulate crowd using social force model un
 Your task is to generate a valid TOML configuration file containing SFM's parameters that accurately reflects the described scenario.
 Respond ONLY with a JSON object containing:
 {
-    "config_file": "TOML string with the config parameters.",
-    "explanation": "Why you choose these parameters. ", 
+    "config_file": "TOML string with the config parameters. The last section is the reason why you choose those parameters based on the scenario.",
     "min_distance": "Suggested minimum distance between agents in meters.ONLY GIVE NUMBER",
 }
   
@@ -116,6 +116,10 @@ sigma = 0.2
 threshold = 3.0
 
 [along_wall_force]
+
+[explanation]
+Why you choose these parameters based on the scenario.
+
 """
 
 
@@ -139,6 +143,37 @@ def _coerce_float(value: object, *, default: Optional[float] = None) -> Optional
 def _safe_tag(text: str) -> str:
     """Sanitize text for filesystem-friendly tags."""
     return re.sub(r"[\\/:]+", "-", text.strip())
+
+
+def _sanitize_toml(config_text: str) -> tuple[str, list[str]]:
+    """
+    Attempt to make loosely formatted TOML from the LLM parseable by:
+    - Commenting free text under an [explanation] section.
+    Returns the cleaned text and a list of applied fixes.
+    """
+    lines = config_text.splitlines()
+    cleaned: list[str] = []
+    notes: set[str] = set()
+    in_explanation = False
+
+    for line in lines:
+        stripped = line.lstrip()
+        if stripped.startswith("[") and stripped.endswith("]"):
+            in_explanation = stripped.lower() == "[explanation]"
+            cleaned.append(line)
+            continue
+
+        if in_explanation:
+            # Explanation is often free-form; TOML expects key/value. Comment it out.
+            bare = stripped.split("#", 1)[0].strip()
+            if bare and "=" not in bare:
+                cleaned.append(f"# {stripped}")
+                notes.add("commented free text in [explanation]")
+                continue
+
+        cleaned.append(line)
+
+    return "\n".join(cleaned), sorted(notes)
 
 
 def _process_gt_data(gt_path: Path, *, apply_homography: bool = False) -> np.ndarray:
@@ -280,11 +315,22 @@ class SimulationRunner:
             raise ValueError("LLM response missing 'config_file'.")
         
         # make it a dict
-        config_dict = toml.loads(config_text)
+        try:
+            config_dict = toml.loads(config_text)
+        except toml.TomlDecodeError as exc:
+            cleaned, notes = _sanitize_toml(config_text)
+            try:
+                config_dict = toml.loads(cleaned)
+                if notes:
+                    logger.warning("Sanitized TOML from LLM (%s)", "; ".join(notes))
+                config_text = cleaned
+            except Exception as exc2:  # noqa: BLE001
+                raise ValueError(f"LLM returned invalid TOML (original error: {exc})") from exc2
+
         self.config = config_dict
         self.min_distance = _coerce_float(response.get("min_distance"))
         if scene.get("step_width") is not None: # gt already has step_width
-            self.step_width = _coerce_float(scene.get().get("step_width"))
+            self.step_width = _coerce_float(scene.get("step_width"))
         else:
             self.step_width = _coerce_float(self.config.get("scene", {}).get("step_width"), default=0.4)
 
@@ -304,7 +350,14 @@ class SimulationRunner:
         path = scene.get("assets", {}).get("anchored_obstacles")
         if not path:
             raise FileNotFoundError("anchored_obstacles path missing in scene assets.")
-        loaded = np.load(Path(path), allow_pickle=False)
+        npz_path = Path(path)
+        if not npz_path.exists():
+            # Common mismatch: file stored as *_anchored.npz but path omits suffix.
+            alt = npz_path.with_name(f"{npz_path.stem}_anchored{npz_path.suffix}")
+            if alt.exists():
+                logger.warning("anchored_obstacles not found at %s; using %s", npz_path, alt)
+                npz_path = alt
+        loaded = np.load(npz_path, allow_pickle=False)
         if isinstance(loaded, np.lib.npyio.NpzFile):
             if "obstacles" in loaded.files:
                 return loaded["obstacles"]
@@ -312,7 +365,7 @@ class SimulationRunner:
                 return loaded[loaded.files[0]]
             raise ValueError(f"No arrays found in obstacle npz: {path}")
         obstacles = np.asarray(loaded)
-        logger.info(f"Loaded obstacles: {path} (shape={obstacles.shape})")
+        logger.info(f"Loaded obstacles: {npz_path} (shape={obstacles.shape})")
         return obstacles
 
     def _build_simulator(self, scene: dict, config_path: Path) -> psf.Simulator:
@@ -335,7 +388,9 @@ class SimulationRunner:
         sim = self._build_simulator(scene, config_path)
         logger.info(f"Running simulation: scene_id={scene.get('scene_id', 'scene')}, steps={steps}")
         logger.info(f"Simulation step width: {self.step_width}, steps: {steps}")
-        sim.step(n=steps)
+        # Manual stepping with progress bar to show simulation progress.
+        for _ in tqdm(range(steps), desc=f"Simulating {scene.get('scene_id', 'scene')}"):
+            sim.step()
         states, _ = sim.get_states()
         scene_id = scene.get("scene_id", "scene")
         out_path = self.sim_dir / f"sim_{scene_id}_{_timestamp()}.npz"
@@ -373,14 +428,29 @@ class SimulationRunner:
             min_distance=self.min_distance or 0.35,
             dt = self.step_width,
         )
-        goals = np.asarray(scene.get("goals_m", []), dtype=float)
-        if goals.size == 0:
-            goals_ctx = None
-        else:
-            if goals.shape[0] < states_eval.shape[1]:
-                idx = np.arange(states_eval.shape[1]) % goals.shape[0]
-                goals = goals[idx]
-            goals_ctx = goals
+        goals_ctx = None
+        goal_raw = scene.get("goal_location_raw", scene.get("goal_location"))
+        goal_disabled = False
+        if goal_raw is None or (isinstance(goal_raw, str) and goal_raw.strip().lower() == "none"):
+            goal_disabled = True
+        if isinstance(goal_raw, dict) and str(goal_raw.get("type", "")).lower() == "none":
+            goal_disabled = True
+
+        if not goal_disabled:
+            # Prefer per-agent goals embedded in the initial state (columns 4:6).
+            initial_state = scene.get("initial_state")
+            if initial_state is not None:
+                try:
+                    init_arr = np.asarray(initial_state, dtype=float)
+                    if init_arr.ndim == 2 and init_arr.shape[1] >= 6:
+                        goals_ctx = init_arr[: states_eval.shape[1], 4:6]
+                except Exception:  # noqa: BLE001
+                    goals_ctx = None
+            if goals_ctx is None:
+                goals = np.asarray(scene.get("goals_m", []), dtype=float)
+                if goals.size > 0:
+                    goals_ctx = goals
+        groups = scene.get("groups")
         event_center = scene.get("event_center_m") or scene.get("event_center")
         event_center_ctx = None
         if event_center is not None:
@@ -390,14 +460,23 @@ class SimulationRunner:
                     event_center_ctx = event_center_arr[:2]
             except Exception:  # noqa: BLE001
                 event_center_ctx = None
-        should_be_away = scene.get("should_be_away_from_event_center")
+        towards_event = scene.get("towards_event")
+        if towards_event is None and "should_be_away_from_event_center" in scene:
+            legacy_away = scene.get("should_be_away_from_event_center")
+            if legacy_away is True:
+                towards_event = False
+            elif legacy_away is False:
+                towards_event = "random"
+        if event_center_ctx is None:
+            towards_event = "random" if towards_event not in (None, "random") else towards_event
 
         metrics = evaluator.evaluate(
             states_eval,
             gt=gt_eval,
             goals=goals_ctx,
             bounds=None,
-            should_be_away_from_event_center=should_be_away,
+            towards_event=towards_event,
+            groups=groups,
             event_center=event_center_ctx,
         )
         ts = _timestamp()
@@ -460,8 +539,13 @@ class SimulationRunner:
             config_path = self.generate_config(scene, model_name=model_name)
         else:
             self.config = toml.load(config_path)
+            
         if scene.get("steps") is not None:  
             steps = int(scene.get("steps"))
+        elif scene.get("step_width") is not None:
+            step_width = _coerce_float(scene.get("step_width"), default=0.4)
+            total_time = 600.0  # default to 10 mins
+            steps = int(total_time / step_width)
         sim_path = self.run_simulation(scene, config_path, steps=steps)
         metrics = self.evaluate(scene, sim_path, model_name, gt_path)
         return config_path, sim_path, metrics
@@ -498,7 +582,7 @@ class SimulationRunner:
 
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             future_to_path = {executor.submit(_worker, p): p for p in files}
-            for future in as_completed(future_to_path):
+            for future in tqdm(as_completed(future_to_path), total=len(files), desc="Scenes"):
                 path = future_to_path[future]
                 try:
                     cfg, sim, metrics = future.result()
@@ -541,10 +625,16 @@ def _parse_args() -> argparse.Namespace:
         type=Path, # downloads/gt/eth/trajectory_dense/seq_eth_trajectory_dense.csv
         help="GT if run the gt scene",
     )
-    parser.add_argument("--steps", type=int, default=500, help="Simulation steps.")
+    parser.add_argument("--steps", type=int, default=1500, help="Simulation steps.") # sim 10 mins
     parser.add_argument("--model-name", default="azure/gpt-5", help="Label to embed in config filename.")
     parser.add_argument("--run-all", action="store_true", help="Simulate all scenes under --preprocessed-dir.")
     parser.add_argument("--max-workers", type=int, default=4, help="Parallel workers when using --run-all.")
+    parser.add_argument(
+        "--results-root",
+        type=Path,
+        default=Path("sim/results"),
+        help="Directory to store generated configs, simulations, and metrics.",
+    )
     return parser.parse_args()
 
 
@@ -572,8 +662,9 @@ def _scene_path_from_context_index(index: int, context_path: Path, preprocessed_
 
 def main() -> None:
     args = _parse_args()
-    runner = SimulationRunner()
-    if args.run_all:
+    runner = SimulationRunner(results_root=args.results_root)
+    # If neither scene nor context-index is provided, default to run_all.
+    if args.run_all or (args.scene is None and args.context_index is None):
         runner.run_all_preprocessed(
             preprocessed_dir=args.preprocessed_dir,
             steps=args.steps,

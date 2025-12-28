@@ -1,0 +1,111 @@
+{
+  "scene_id": "37_Millennium_Park_simplified_obstacle_anchored",
+  "scene_index": 30,
+  "scenario": "Pop-up poetry circle: expressive crowd mills softly around a reading spot, then disperses to quiet corners.",
+  "category": "Expressive",
+  "crowd_size_label": "0-50",
+  "crowd_size": 2,
+  "ungrouped_agents": 2,
+  "event_center_px": [
+    135.0,
+    135.0
+  ],
+  "event_center_m": [
+    60.02068870514631,
+    206.7379277618602
+  ],
+  "goal_location_raw": {
+    "type": "gaussian_mixture_truncated_to_walkable",
+    "components": [
+      {
+        "weight": 0.35,
+        "mean_px": [
+          220,
+          700
+        ],
+        "sigma_px": [
+          24,
+          20
+        ],
+        "support_radius_px": 85
+      },
+      {
+        "weight": 0.35,
+        "mean_px": [
+          620,
+          700
+        ],
+        "sigma_px": [
+          24,
+          20
+        ],
+        "support_radius_px": 85
+      },
+      {
+        "weight": 0.3,
+        "mean_px": [
+          220,
+          90
+        ],
+        "sigma_px": [
+          22,
+          18
+        ],
+        "support_radius_px": 65
+      }
+    ]
+  },
+  "goals_px": [
+    [
+      621.0,
+      215.0
+    ],
+    [
+      559.0,
+      468.0
+    ],
+    [
+      188.30330133881853,
+      111.12677533721465
+    ]
+  ],
+  "goals_m": [
+    [
+      276.095168042928,
+      171.17011223267764
+    ],
+    [
+      248.53011100925505,
+      58.686895622871816
+    ],
+    [
+      83.7192135695368,
+      217.35190839786083
+    ]
+  ],
+  "initial_state": [
+    [
+      243.63953637331724,
+      235.63677787873894,
+      0.3147731131623847,
+      -0.6252342658796465,
+      276.095168042928,
+      171.17011223267764
+    ],
+    [
+      256.53286950290203,
+      40.45839016418904,
+      -0.281393043412585,
+      0.6409508211391909,
+      248.53011100925505,
+      58.686895622871816
+    ]
+  ],
+  "groups": [],
+  "towards_event": true,
+  "assets": {
+    "obstacle_png": "downloads/maps/simplified_obstacles/37_Millennium_Park_simplified_obstacle.png",
+    "homography": "downloads/google_maps/homographies/37_Millennium_Park_simplified_obstacle_anchored.txt",
+    "anchored_obstacles": "preprocess/pysfm_obstacles_meter_close_shape/37_Millennium_Park_simplified_obstacle_anchored.npz"
+  }
+}

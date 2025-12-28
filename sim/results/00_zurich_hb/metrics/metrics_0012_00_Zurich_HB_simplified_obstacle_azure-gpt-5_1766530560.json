@@ -1,0 +1,17 @@
+{
+  "metrics": {
+    "ADE": "NaN",
+    "FDE": "NaN",
+    "EMD": "NaN",
+    "Kinem": "NaN",
+    "CollisionRate": 0.009076291860722998,
+    "VD": "NaN",
+    "DDS": "NaN",
+    "GoalRate": 0.06172839506172839,
+    "SocialDistanceViolations": 0.015353860180872822
+  },
+  "states_path": "sim/results/simulations/sim_00_Zurich_HB_simplified_obstacle_1766530554.npz",
+  "flow_heatmap_path": "sim/results/metrics/flow_0012_00_Zurich_HB_simplified_obstacle_azure-gpt-5_1766530560.png",
+  "density_map_path": "sim/results/metrics/density_0012_00_Zurich_HB_simplified_obstacle_azure-gpt-5_1766530560.png",
+  "trajectory_plot_path": "sim/results/metrics/traj_0012_00_Zurich_HB_simplified_obstacle_azure-gpt-5_1766530560.png"
+}

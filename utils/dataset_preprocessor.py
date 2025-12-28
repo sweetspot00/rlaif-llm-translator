@@ -168,15 +168,17 @@ def _validate_group_coverage(n_agents: int, groups: list[list[int]]) -> int:
 
 @dataclass
 class ScenePreprocessor:
-    context_path: Path = Path("datasets/context_simplified_test.jsonl")
+    context_path: Path = Path("datasets/context_simplified_98_sentosa.jsonl")
     obstacles_png_dir: Path = Path("downloads/google_maps/simplified_obstacles")
     homography_dir: Path = Path("downloads/google_maps/homographies")
-    output_dir: Path = Path("preprocess/preprocessed_scene")
+    output_dir: Path = Path("preprocess/preprocessed_scene/98_sentosa")
     # desired_speed: float = 1.2 get from context.jsonl
     spawn_std_px: float = 30.0
     goal_std_px: float = 40.0
     rng: np.random.Generator = field(default_factory=np.random.default_rng)
     anchored_obstacles_dir: Path = Path("preprocess/pysfm_obstacles_meter_close_shape")
+    min_goal_distance_m: float = 220.0
+    max_goal_resample_attempts: int = 50
 
     def _find_by_substring(self, directory: Path, tokens: list[str], extension: str) -> Path | None:
         """
@@ -201,6 +203,7 @@ class ScenePreprocessor:
             "_obstacle_simplified",
             "_obstacle",
             "_simplified",
+            "_simplified_obstacle_anchored",
         ]:
             if base_id.endswith(suffix):
                 base_id = base_id[: -len(suffix)]
@@ -210,12 +213,23 @@ class ScenePreprocessor:
         tokens = [scene_id, base_id, core_id]
 
         png_path = self._find_by_substring(self.obstacles_png_dir, tokens, ".png")
+        if png_path is None:
+            fallback_png_dir = Path("downloads/maps/simplified_obstacles")
+            png_path = self._find_by_substring(fallback_png_dir, tokens, ".png")
+
         homography_path = self._find_by_substring(self.homography_dir, tokens, ".txt")
+        if homography_path is None:
+            fallback_h_dir = Path("downloads/maps/homographies")
+            homography_path = self._find_by_substring(fallback_h_dir, tokens, ".txt")
 
         if png_path is None:
-            raise FileNotFoundError(f"No obstacle PNG found for {scene_id} under {self.obstacles_png_dir}")
+            raise FileNotFoundError(
+                f"No obstacle PNG found for {scene_id} under {self.obstacles_png_dir} or downloads/maps/simplified_obstacles"
+            )
         if homography_path is None:
-            raise FileNotFoundError(f"No homography found for {scene_id} under {self.homography_dir}")
+            raise FileNotFoundError(
+                f"No homography found for {scene_id} under {self.homography_dir} or downloads/maps/homographies"
+            )
 
         img = Image.open(png_path).convert("L")
         mask = (np.array(img, dtype=np.uint8) > 0)  # True = walkable
@@ -250,13 +264,39 @@ class ScenePreprocessor:
 
     def _goals_px(
         self,
-        goal_location: str,
+        goal_location: object,
         event_center_px: np.ndarray,
         mask: np.ndarray,
         walkable_points: np.ndarray,
     ) -> np.ndarray:
         if isinstance(goal_location, dict):
             gl_type = str(goal_location.get("type", "")).lower()
+            points_list = goal_location.get("points") or goal_location.get("point")
+            if gl_type in {"pixels", "points"} and points_list:
+                pts = np.asarray(points_list, dtype=float)
+                if pts.ndim == 1:
+                    pts = pts[None, :]
+                snapped = [_nearest_walkable(mask, walkable_points, p) for p in pts]
+                return np.vstack(snapped)
+            if "uniform_distribution_walkable" in gl_type:
+                bounds = goal_location.get("range_boundaries") or goal_location.get("bounds")
+                count = int(goal_location.get("count", 1))
+                if isinstance(bounds, (list, tuple)) and len(bounds) >= 2:
+                    lo = np.asarray(bounds[0], dtype=float)
+                    hi = np.asarray(bounds[1], dtype=float)
+                    if lo.size >= 2 and hi.size >= 2:
+                        samples = []
+                        for _ in range(count):
+                            candidate = self.rng.uniform(low=lo[:2], high=hi[:2])
+                            candidate = _nearest_walkable(mask, walkable_points, candidate)
+                            samples.append(candidate)
+                        if samples:
+                            return np.vstack(samples)
+                # fallback: random goals if bounds malformed
+                idx = self.rng.choice(
+                    len(walkable_points), size=count, replace=len(walkable_points) < count
+                )
+                return walkable_points[idx]
             # Mixture of components: sample one goal from each component mean/sigma.
             if "components" in goal_location:
                 goals: list[np.ndarray] = []
@@ -294,6 +334,12 @@ class ScenePreprocessor:
             px = _nearest_walkable(mask, walkable_points, px)
             return np.vstack([px])
 
+        # Allow list-of-points without dict wrapper.
+        if isinstance(goal_location, (list, tuple)) and np.asarray(goal_location, dtype=object).ndim == 2:
+            pts = np.asarray(goal_location, dtype=float)
+            snapped = [_nearest_walkable(mask, walkable_points, p) for p in pts]
+            return np.vstack(snapped)
+
         mode, count = _parse_goal_spec(str(goal_location))
         if mode == "random":
             idx = self.rng.choice(len(walkable_points), size=count, replace=False if len(walkable_points) >= count else True)
@@ -304,6 +350,54 @@ class ScenePreprocessor:
             )
         # fixed location string not parsed -> fall back to event center
         return np.vstack([_nearest_walkable(mask, walkable_points, event_center_px)] * count)
+
+    def _is_away_from_event(self, towards_event: object) -> bool:
+        if isinstance(towards_event, str):
+            value = towards_event.strip().lower()
+            if value in {"false", "0", "no", "away"}:
+                return True
+            if value in {"true", "1", "yes", "towards"}:
+                return False
+            return False
+        return towards_event is False
+
+    def _sample_goals_with_validation(
+        self,
+        goal_location: object,
+        event_center_px: np.ndarray,
+        event_center_m: np.ndarray,
+        mask: np.ndarray,
+        walkable_points: np.ndarray,
+        px_to_m,
+        towards_event: object,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        requires_far_goal = self._is_away_from_event(towards_event) and np.isfinite(event_center_m).all()
+        if not requires_far_goal:
+            goals_px = self._goals_px(goal_location, event_center_px, mask, walkable_points)
+            goals_m = self._convert_px_to_m(px_to_m, goals_px)
+            return goals_px, goals_m
+
+        goals_px: np.ndarray | None = None
+        goals_m: np.ndarray | None = None
+        for _ in range(self.max_goal_resample_attempts):
+            goals_px = self._goals_px(goal_location, event_center_px, mask, walkable_points)
+            goals_m = self._convert_px_to_m(px_to_m, goals_px)
+            distances = np.linalg.norm(goals_m - event_center_m, axis=1)
+            if np.all(distances >= self.min_goal_distance_m):
+                return goals_px, goals_m
+
+        walkable_m = self._convert_px_to_m(px_to_m, walkable_points)
+        distances_walkable = np.linalg.norm(walkable_m - event_center_m, axis=1)
+        count = goals_px.shape[0] if goals_px is not None else 1
+        farthest_idx = np.argsort(distances_walkable)[::-1][:count]
+        fallback_px = walkable_points[farthest_idx]
+        fallback_m = self._convert_px_to_m(px_to_m, fallback_px)
+        logger.warning(
+            "Goals remained within %.1fm of event center after %d attempts; using farthest walkable points.",
+            self.min_goal_distance_m,
+            self.max_goal_resample_attempts,
+        )
+        return fallback_px, fallback_m
 
     def _assign_goals(
         self,
@@ -351,35 +445,67 @@ class ScenePreprocessor:
         scene_id = Path(str(context["image"])).stem
         mask, walkable_points, px_to_m, obstacle_png_path = self._load_assets(scene_id)
         self.desired_speed = context.get("desired_speed", 1.2)
+        towards_event = context.get("towards_event", "random")
         event_center_raw = context.get("event_center", (0, 0))
         if isinstance(event_center_raw, dict):
             ec_type = str(event_center_raw.get("type", "")).lower()
-            mean_px = np.asarray(event_center_raw.get("mean_px", walkable_points.mean(axis=0)), dtype=float)
-            sigma_px = event_center_raw.get("sigma_px", self.spawn_std_px)
-            if isinstance(sigma_px, (list, tuple, np.ndarray)):
-                std_px = float(np.mean(sigma_px))
+            if "uniform_distribution_walkable" in ec_type:
+                bounds = event_center_raw.get("range_boundaries") or event_center_raw.get("bounds")
+                if isinstance(bounds, (list, tuple)) and len(bounds) >= 2:
+                    lo = np.asarray(bounds[0], dtype=float)
+                    hi = np.asarray(bounds[1], dtype=float)
+                    if lo.size >= 2 and hi.size >= 2:
+                        candidate = self.rng.uniform(low=lo[:2], high=hi[:2])
+                        event_center_px = _nearest_walkable(mask, walkable_points, candidate)
+                    else:
+                        event_center_px = walkable_points.mean(axis=0)
+                else:
+                    event_center_px = walkable_points.mean(axis=0)
+            elif event_center_raw.get("points"):
+                pts = np.asarray(event_center_raw.get("points"), dtype=float)
+                if pts.ndim == 1:
+                    pts = pts[None, :]
+                # use centroid of provided points, snapped to walkable
+                event_center_px = _nearest_walkable(mask, walkable_points, pts.mean(axis=0))
             else:
-                std_px = float(sigma_px)
-            if "gaussian" in ec_type:
-                event_center_px = _sample_truncated_gaussian(
-                    self.rng, walkable_points, mask, mean_px=mean_px, std_px=std_px, n=1
-                )[0]
-            else:
-                event_center_px = _nearest_walkable(mask, walkable_points, mean_px)
+                mean_px = np.asarray(event_center_raw.get("mean_px", walkable_points.mean(axis=0)), dtype=float)
+                sigma_px = event_center_raw.get("sigma_px", self.spawn_std_px)
+                if isinstance(sigma_px, (list, tuple, np.ndarray)):
+                    std_px = float(np.mean(sigma_px))
+                else:
+                    std_px = float(sigma_px)
+                if "gaussian" in ec_type:
+                    event_center_px = _sample_truncated_gaussian(
+                        self.rng, walkable_points, mask, mean_px=mean_px, std_px=std_px, n=1
+                    )[0]
+                else:
+                    event_center_px = _nearest_walkable(mask, walkable_points, mean_px)
         elif isinstance(event_center_raw, str) and "gaussian" in event_center_raw.lower():
             mean_px = walkable_points.mean(axis=0)
             event_center_px = _sample_truncated_gaussian(
                 self.rng, walkable_points, mask, mean_px=mean_px, std_px=self.spawn_std_px, n=1
             )[0]
         else:
-            event_center_px = np.asarray(event_center_raw, dtype=float)
+            try:
+                event_center_px = np.asarray(event_center_raw, dtype=float)
+            except Exception:
+                event_center_px = np.array([], dtype=float)
+            if event_center_px.size < 2 or not np.isfinite(event_center_px).all():
+                event_center_px = walkable_points.mean(axis=0)
             if not _is_walkable(mask, event_center_px):
                 event_center_px = _nearest_walkable(mask, walkable_points, event_center_px)
         event_center_m = self._convert_px_to_m(px_to_m, event_center_px)[0]
         logger.info("Scene %s: event center px=%s m=%s", scene_id, event_center_px, event_center_m)
 
-        goals_px = self._goals_px(context.get("goal_location", "Random (1)"), event_center_px, mask, walkable_points)
-        goals_m = self._convert_px_to_m(px_to_m, goals_px)
+        goals_px, goals_m = self._sample_goals_with_validation(
+            context.get("goal_location", "Random (1)"),
+            event_center_px,
+            event_center_m,
+            mask,
+            walkable_points,
+            px_to_m,
+            towards_event,
+        )
 
         n_agents = self._pick_crowd_size(context.get("crowd_size", "10-20"))
         replace = len(walkable_points) < n_agents
@@ -416,10 +542,11 @@ class ScenePreprocessor:
             "goals_m": goals_m.tolist(),
             "initial_state": initial_state.tolist(),
             "groups": [list(map(int, g)) for g in groups],
+            "towards_event": towards_event,
             "assets": {
                 "obstacle_png": str(obstacle_png_path),
                 "homography": str(self.homography_dir / f"{scene_id}.txt"),
-                "anchored_obstacles": str(self.anchored_obstacles_dir / f"{scene_id}_anchored.npz"),
+                "anchored_obstacles": str(self.anchored_obstacles_dir / f"{scene_id}.npz"),
             },
         }
 

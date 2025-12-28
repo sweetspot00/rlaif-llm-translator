@@ -1,0 +1,22 @@
+{
+  "metrics": {
+    "ADE": "NaN",
+    "FDE": "NaN",
+    "EMD": "NaN",
+    "Kinem": "NaN",
+    "CollisionRate": 0.004619517602423513,
+    "VD": "NaN",
+    "DDS": "NaN",
+    "GoalRate": 0.7183544303797469,
+    "goal_achieve_as_long_as_pass_by": 0.7753164556962026,
+    "SocialDistanceViolations": 0.009356082616946683,
+    "towards_event_achieve_rate": 0.7310126582278481,
+    "away_event_achieve_rate": "NaN",
+    "group_stick_together": 0.127286211707918,
+    "group_goal_achievement": 0.20754716981132076
+  },
+  "states_path": "sim/results/37_millennium/simulations/sim_37_Millennium_Park_simplified_obstacle_anchored_1766857542.npz",
+  "flow_heatmap_path": "sim/results/37_millennium/metrics/flow_0027_37_Millennium_Park_simplified_obstacle_anchored_azure-gpt-5_1766857591.png",
+  "density_map_path": "sim/results/37_millennium/metrics/density_0027_37_Millennium_Park_simplified_obstacle_anchored_azure-gpt-5_1766857591.png",
+  "trajectory_plot_path": "sim/results/37_millennium/metrics/traj_0027_37_Millennium_Park_simplified_obstacle_anchored_azure-gpt-5_1766857591.png"
+}

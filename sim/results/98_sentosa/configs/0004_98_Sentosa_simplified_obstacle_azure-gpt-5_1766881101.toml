@@ -1,0 +1,57 @@
+title = "Mobility Clinic Plaza - Controlled Rolling"
+
+[scene]
+enable_group = true
+agent_radius = 0.4
+step_width = 0.4
+max_speed_multiplier = 1.1
+tau = 0.8
+resolution = 10
+
+[goal_attractive_force]
+factor = 0.9
+
+[ped_repulsive_force]
+factor = 2.2
+v0 = 3.0
+sigma = 0.45
+fov_phi = 140.0
+fov_factor = 0.6
+
+[space_repulsive_force]
+factor = 1.2
+u0 = 12
+r = 0.25
+
+[group_coherence_force]
+factor = 5.0
+
+[group_repulsive_force]
+factor = 0.6
+threshold = 0.7
+
+[group_gaze_force]
+factor = 3.0
+fov_phi = 120.0
+
+[desired_force]
+factor = 0.9
+relaxation_time = 0.8
+goal_threshold = 0.25
+
+[social_force]
+factor = 5.0
+lambda_importance = 2.5
+gamma = 0.35
+n = 2
+n_prime = 3
+
+[obstacle_force]
+factor = 12.0
+sigma = 0.25
+threshold = 2.5
+
+[along_wall_force]
+
+[explanation]
+# These parameters model a controlled mobility clinic in an open plaza with cones/markers. Agents move cautiously with assistance, so desired movement is gentle (goal_attractive_force 0.9, desired_force factor 0.9) and acceleration/response is slower (scene.tau and desired_force.relaxation_time at 0.8). To reflect mobility devices and safety buffers, agent_radius is increased to 0.4 m, and person-person avoidance is strengthened and longer-ranged (ped_repulsive_force factor 2.2, v0 3.0, sigma 0.45) with wider awareness (fov_phi 140°, fov_factor 0.6). Group dynamics are important for patient–assistant pairs: strong cohesion (group_coherence_force 5.0) and coordination (group_gaze_force 3.0), while allowing close proximity within the pair (group_repulsive_force 0.6, threshold 0.7). Cones and markers act as numerous small obstacles shaping lanes, so obstacle avoidance is emphasized (obstacle_force factor 12.0, sigma 0.25, threshold 2.5) and space repulsion discourages squeezing through tight gaps (space_repulsive_force factor 1.2, u0 12, r 0.25). Maximum speed is capped conservatively (max_speed_multiplier 1.1) and step width 0.4 s provides stable updates for slow, deliberate rolling.
