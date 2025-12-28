@@ -1,0 +1,55 @@
+title = "Coordinated School Field Trip - West to East in Corridors"
+
+[scene]
+enable_group = true
+agent_radius = 0.32
+step_width = 0.35
+max_speed_multiplier = 1.2
+tau = 0.5
+resolution = 1
+
+[goal_attractive_force]
+factor = 1.2
+
+[ped_repulsive_force]
+factor = 1.2
+v0 = 2.0
+sigma = 0.3
+fov_phi = 95.0
+fov_factor = 0.3
+
+[space_repulsive_force]
+factor = 0.8
+u0 = 8
+r = 0.2
+
+[group_coherence_force]
+factor = 5.0
+
+[group_repulsive_force]
+factor = 0.8
+threshold = 0.45
+
+[group_gaze_force]
+factor = 5.0
+fov_phi = 70.0
+
+[desired_force]
+factor = 1.0
+relaxation_time = 0.45
+goal_threshold = 0.25
+
+[social_force]
+factor = 5.2
+lambda_importance = 2.5
+gamma = 0.35
+n = 2
+n_prime = 3
+
+[obstacle_force]
+factor = 12.0
+sigma = 0.25
+threshold = 2.0
+
+[along_wall_force]
+factor = 0.0

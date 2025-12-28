@@ -1,0 +1,54 @@
+title = "Park Light Sightseeing Flow"
+
+[scene]
+enable_group = true
+agent_radius = 0.35
+step_width = 0.4
+max_speed_multiplier = 1.2
+tau = 0.6
+resolution = 10
+
+[goal_attractive_force]
+factor = 0.9
+
+[ped_repulsive_force]
+factor = 1.2
+v0 = 1.8
+sigma = 0.4
+fov_phi = 140.0
+fov_factor = 0.7
+
+[space_repulsive_force]
+factor = 0.9
+u0 = 8.0
+r = 0.25
+
+[group_coherence_force]
+factor = 4.0
+
+[group_repulsive_force]
+factor = 0.5
+threshold = 0.6
+
+[group_gaze_force]
+factor = 5.0
+fov_phi = 110.0
+
+[desired_force]
+factor = 0.9
+relaxation_time = 0.7
+goal_threshold = 0.6
+
+[social_force]
+factor = 4.8
+lambda_importance = 1.8
+gamma = 0.35
+n = 2
+n_prime = 3
+
+[obstacle_force]
+factor = 8.0
+sigma = 0.25
+threshold = 2.5
+
+[along_wall_force]

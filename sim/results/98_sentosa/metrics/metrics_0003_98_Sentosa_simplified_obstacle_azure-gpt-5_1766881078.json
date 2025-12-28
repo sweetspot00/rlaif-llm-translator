@@ -1,0 +1,22 @@
+{
+  "metrics": {
+    "ADE": "NaN",
+    "FDE": "NaN",
+    "EMD": "NaN",
+    "Kinem": "NaN",
+    "CollisionRate": 0.02540730422142814,
+    "VD": "NaN",
+    "DDS": "NaN",
+    "GoalRate": 0.6666666666666666,
+    "goal_achieve_as_long_as_pass_by": 0.6666666666666666,
+    "SocialDistanceViolations": 0.03327074879373347,
+    "towards_event_achieve_rate": 1.0,
+    "away_event_achieve_rate": "NaN",
+    "group_stick_together": "NaN",
+    "group_goal_achievement": "NaN"
+  },
+  "states_path": "sim/results/98_sentosa/simulations/sim_98_Sentosa_simplified_obstacle_1766881078.npz",
+  "flow_heatmap_path": "sim/results/98_sentosa/metrics/flow_0003_98_Sentosa_simplified_obstacle_azure-gpt-5_1766881078.png",
+  "density_map_path": "sim/results/98_sentosa/metrics/density_0003_98_Sentosa_simplified_obstacle_azure-gpt-5_1766881078.png",
+  "trajectory_plot_path": "sim/results/98_sentosa/metrics/traj_0003_98_Sentosa_simplified_obstacle_azure-gpt-5_1766881078.png"
+}

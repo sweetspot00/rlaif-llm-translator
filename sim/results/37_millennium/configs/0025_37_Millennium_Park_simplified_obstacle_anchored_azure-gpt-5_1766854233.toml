@@ -1,0 +1,54 @@
+title = "Guided Architecture Walk - Two Cohesive Clusters in North Corridor"
+
+[scene]
+enable_group = true
+agent_radius = 0.35
+step_width = 0.3
+max_speed_multiplier = 1.15
+tau = 0.5
+resolution = 1
+
+[goal_attractive_force]
+factor = 1.0
+
+[ped_repulsive_force]
+factor = 1.6
+v0 = 2.2
+sigma = 0.3
+fov_phi = 110.0
+fov_factor = 0.6
+
+[space_repulsive_force]
+factor = 0.9
+u0 = 8.0
+r = 0.25
+
+[group_coherence_force]
+factor = 4.5
+
+[group_repulsive_force]
+factor = 0.9
+threshold = 0.6
+
+[group_gaze_force]
+factor = 5.0
+fov_phi = 90.0
+
+[desired_force]
+factor = 1.0
+relaxation_time = 0.5
+goal_threshold = 0.25
+
+[social_force]
+factor = 5.2
+lambda_importance = 2.2
+gamma = 0.35
+n = 2
+n_prime = 3
+
+[obstacle_force]
+factor = 12.0
+sigma = 0.25
+threshold = 3.0
+
+[along_wall_force]

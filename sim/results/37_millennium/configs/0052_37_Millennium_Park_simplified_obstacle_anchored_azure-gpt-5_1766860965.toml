@@ -1,0 +1,54 @@
+title = "Public Art Rally Column - East to South Seating"
+
+[scene]
+enable_group = true
+agent_radius = 0.3
+step_width = 0.4
+max_speed_multiplier = 1.2
+tau = 0.5
+resolution = 1
+
+[goal_attractive_force]
+factor = 1.2
+
+[ped_repulsive_force]
+factor = 1.2
+v0 = 1.8
+sigma = 0.25
+fov_phi = 90.0
+fov_factor = 0.4
+
+[space_repulsive_force]
+factor = 0.8
+u0 = 8.0
+r = 0.15
+
+[group_coherence_force]
+factor = 5.0
+
+[group_repulsive_force]
+factor = 0.8
+threshold = 0.45
+
+[group_gaze_force]
+factor = 3.5
+fov_phi = 80.0
+
+[desired_force]
+factor = 1.0
+relaxation_time = 0.6
+goal_threshold = 0.3
+
+[social_force]
+factor = 4.8
+lambda_importance = 2.2
+gamma = 0.35
+n = 2
+n_prime = 3
+
+[obstacle_force]
+factor = 12.0
+sigma = 0.25
+threshold = 2.5
+
+[along_wall_force]

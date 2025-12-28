@@ -1,0 +1,58 @@
+title = "School Group to Southwest Photo Spot"
+
+[scene]
+enable_group = true
+agent_radius = 0.3
+step_width = 0.4 # seconds per simulation step
+max_speed_multiplier = 1.2 # keep pace moderate for a group
+tau = 0.6
+resolution = 1 # 1 meter per unit
+
+[goal_attractive_force]
+factor = 1.2 # slightly stronger pull to destination
+
+[ped_repulsive_force]
+factor = 1.3
+v0 = 2.0
+sigma = 0.3
+# anisotropic fov to emphasize forward interactions
+fov_phi = 120.0
+fov_factor = 0.4 # reduced influence from behind
+
+[space_repulsive_force]
+factor = 1.0
+u0 = 8.0
+r = 0.2
+
+[group_coherence_force]
+factor = 5.0 # keep the school group tight
+
+[group_repulsive_force]
+factor = 0.6 # allow closer spacing within the group
+threshold = 0.45
+
+[group_gaze_force]
+factor = 4.5 # align attention toward leader/photo spot
+fov_phi = 120.0
+
+[desired_force]
+factor = 1.0
+relaxation_time = 0.6
+goal_threshold = 0.4 # gather tightly at the photo spot
+
+[social_force]
+factor = 5.0
+lambda_importance = 2.3
+gamma = 0.35
+n = 2
+n_prime = 3
+
+[obstacle_force]
+factor = 12.0 # emphasize benches/walls near seating area
+sigma = 0.25
+threshold = 3.0
+
+[along_wall_force]
+
+[explanation]
+# A school group moving together from the north entrance to a southwest photo spot benefits from strong intra-group cohesion and gaze alignment, so group_coherence_force and group_gaze_force are set high, while group_repulsive_force is reduced with a lower threshold to allow close walking and clustering at the goal. A slightly stronger goal attraction and a small goal_threshold help the group converge tightly at the photo location. Moderate ped_repulsive settings with a 120° field of view and reduced out-of-view influence capture forward-focused navigation typical of following a leader. Obstacle forces are elevated to ensure benches/walls around the southwest seating area are strongly avoided. Pace and responsiveness (step_width, tau, relaxation_time, max_speed_multiplier) are tuned for a steady, cohesive group walk rather than fast individual motion. Resolution is set to 1 to match 1 meter per unit, and the agent radius of 0.3 m supports close but comfortable group spacing.

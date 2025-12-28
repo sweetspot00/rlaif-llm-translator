@@ -1,0 +1,55 @@
+title = "Lunchtime Park Drift"
+
+[scene]
+enable_group = true
+agent_radius = 0.36
+step_width = 0.4
+max_speed_multiplier = 1.1
+tau = 0.9
+resolution = 10
+
+[goal_attractive_force]
+factor = 0.9
+
+[ped_repulsive_force]
+factor = 1.2
+v0 = 1.8
+sigma = 0.35
+fov_phi = 110.0
+fov_factor = 0.6
+
+[space_repulsive_force]
+factor = 0.8
+u0 = 8
+r = 0.25
+
+[group_coherence_force]
+factor = 2.0
+
+[group_repulsive_force]
+factor = 0.6
+threshold = 0.6
+
+[group_gaze_force]
+factor = 3.0
+fov_phi = 95.0
+
+[desired_force]
+factor = 1.0
+relaxation_time = 0.9
+goal_threshold = 0.5
+
+[social_force]
+factor = 4.5
+lambda_importance = 1.8
+gamma = 0.35
+n = 2
+n_prime = 3
+
+[obstacle_force]
+factor = 8.0
+sigma = 0.25
+threshold = 2.0
+
+[along_wall_force]
+factor = 1.2

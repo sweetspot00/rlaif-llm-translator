@@ -1,0 +1,84 @@
+{
+  "scene_id": "104_Potsdamer_Platz_simplified_obstacle",
+  "scene_index": 19,
+  "scenario": "Pop-up dance circle by the southwest seating area; spectators gather briefly and then wander off to various corners.",
+  "category": "Expressive",
+  "crowd_size_label": "0-50",
+  "crowd_size": 2,
+  "ungrouped_agents": 0,
+  "event_center_px": [
+    240.0,
+    520.0
+  ],
+  "event_center_m": [
+    87.22901944699697,
+    29.076339815743268
+  ],
+  "goal_location_raw": {
+    "type": "pixels",
+    "points": [
+      [
+        240,
+        520
+      ],
+      [
+        600,
+        20
+      ],
+      [
+        620,
+        300
+      ],
+      [
+        20,
+        300
+      ],
+      [
+        620,
+        560
+      ]
+    ]
+  },
+  "goals_px": [
+    [
+      240.0,
+      520.0
+    ]
+  ],
+  "goals_m": [
+    [
+      87.22901944699697,
+      29.076339815743268
+    ]
+  ],
+  "initial_state": [
+    [
+      186.8154833158478,
+      98.85955537296832,
+      -0.49137059319281085,
+      -0.344318079899016,
+      87.22901944699697,
+      29.076339815743268
+    ],
+    [
+      98.49610112560913,
+      40.706875742413104,
+      -0.4174771294895316,
+      -0.4309441336799712,
+      87.22901944699697,
+      29.076339815743268
+    ]
+  ],
+  "groups": [
+    [
+      0,
+      1
+    ]
+  ],
+  "towards_event": "true",
+  "assets": {
+    "obstacle_png": "downloads/maps/simplified_obstacles/104_Potsdamer_Platz_simplified_obstacle.png",
+    "homography": "downloads/google_maps/homographies/104_Potsdamer_Platz_simplified_obstacle.txt",
+    "anchored_obstacles": "preprocess/pysfm_obstacles_meter_close_shape/104_Potsdamer_Platz_simplified_obstacle_anchored.npz"
+  }
+}

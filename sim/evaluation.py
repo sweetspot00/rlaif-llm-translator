@@ -48,10 +48,11 @@ MetricFunc = Callable[[np.ndarray, np.ndarray, dict], float]
 class TrajectoryEvaluator:
     min_distance: float = 0.35
     collision_distance: float = 0.7
-    goal_radius: float = 0.5
-    goal_tolerance: float = 0.0
+    goal_radius: float = 5
+    goal_tolerance: float = 10
     density_bins: int = 20
     dt: float = 0.4 # step_width in seconds, align to pysocialforce default
+    group_cohesion_threshold: float = 5
     metrics: Iterable[str] = field(
         default_factory=lambda: (
             "ADE",
@@ -62,8 +63,13 @@ class TrajectoryEvaluator:
             "VD",
             "DDS",
             "GoalRate",
+            "goal_achieve_as_long_as_pass_by",
             # "Hausdorff",
-            "SocialDistanceViolations"
+            "SocialDistanceViolations",
+            "towards_event_achieve_rate",
+            "away_event_achieve_rate",
+            "group_stick_together",
+            "group_goal_achievement",
         )
     )
     result: Dict[str, float] = field(default_factory=dict, init=False)
@@ -160,12 +166,46 @@ class TrajectoryEvaluator:
         return violations / total_pairs
 
     def _metric_goal_rate(self, pred: np.ndarray, _: Optional[np.ndarray], ctx: dict) -> float:
+        pred_goal = ctx.get("pred_scenario", pred)
+        success = self._goal_success_mask(pred_goal, ctx.get("goals"))
+        if success is None:
+            return np.nan
+        return float(np.mean(success))
+
+    def _goal_success_mask(self, pred: np.ndarray, goals: Optional[np.ndarray]) -> Optional[np.ndarray]:
+        if goals is None:
+            return None
+        goals_arr = np.asarray(goals, dtype=float)
+        if goals_arr.ndim != 2 or goals_arr.shape[1] != 2:
+            return None
+        tol = self.goal_radius + self.goal_tolerance
+        final_pos = pred[-1]
+        if goals_arr.shape[0] == final_pos.shape[0]:
+            dists = np.linalg.norm(final_pos - goals_arr, axis=-1)
+        else:
+            dists = _pairwise_distances(final_pos, goals_arr).min(axis=1)
+        return dists <= tol
+
+    def _metric_goal_pass_by(self, pred: np.ndarray, _: Optional[np.ndarray], ctx: dict) -> float:
+        pred_goal = ctx.get("pred_scenario", pred)
         goals = ctx.get("goals")
         if goals is None:
             return np.nan
-        final_dist = np.linalg.norm(pred[-1] - goals, axis=-1)
+        goals_arr = np.asarray(goals, dtype=float)
+        if goals_arr.ndim != 2 or goals_arr.shape[1] != 2:
+            return np.nan
         tol = self.goal_radius + self.goal_tolerance
-        return float(np.mean(final_dist <= tol))
+        T, N, _ = pred_goal.shape
+        if goals_arr.shape[0] == N:
+            # Per-agent goals: min distance along trajectory to each agent's goal
+            dists = np.linalg.norm(pred_goal - goals_arr[None, :, :], axis=-1)
+            min_dist = dists.min(axis=0)
+        else:
+            # Shared goals: min distance to any goal over all timesteps
+            pred_flat = pred_goal.reshape(T * N, 2)
+            dists = _pairwise_distances(pred_flat, goals_arr).reshape(T, N, -1)
+            min_dist = dists.min(axis=(0, 2))
+        return float(np.mean(min_dist <= tol))
 
     def _metric_vd(self, pred: np.ndarray, gt: np.ndarray, _: dict) -> float:
         ang_pred = _angular_velocity(pred, self.dt)
@@ -186,6 +226,97 @@ class TrajectoryEvaluator:
         hist_pred = _histogram_density(pred, bounds, self.density_bins)
         hist_gt = _histogram_density(gt, bounds, self.density_bins)
         return float(np.minimum(hist_pred, hist_gt).sum())
+
+    def _metric_event_direction(
+        self,
+        pred: np.ndarray,
+        _: Optional[np.ndarray],
+        ctx: dict,
+        *,
+        towards: bool,
+    ) -> float:
+        direction = ctx.get("towards_event")
+        if direction is None or direction == "random":
+            return np.nan
+        if towards and direction is not True:
+            return np.nan
+        if not towards and direction is not False:
+            return np.nan
+
+        event_center = ctx.get("event_center")
+        if event_center is None:
+            return np.nan
+        center = np.asarray(event_center, dtype=float).reshape(-1)
+        if center.size < 2:
+            return np.nan
+        center = center[:2]
+        start = pred[0]
+        end = pred[-1]
+        start_dist = np.linalg.norm(start - center, axis=1)
+        end_dist = np.linalg.norm(end - center, axis=1)
+        if start_dist.size == 0:
+            return np.nan
+        if towards:
+            moving = end_dist <= (start_dist + 1e-6)
+        else:
+            moving = end_dist >= (start_dist - 1e-6)
+        return float(np.mean(moving))
+
+    def _metric_towards_event(self, pred: np.ndarray, gt: Optional[np.ndarray], ctx: dict) -> float:
+        return self._metric_event_direction(pred, gt, ctx, towards=True)
+
+    def _metric_away_event(self, pred: np.ndarray, gt: Optional[np.ndarray], ctx: dict) -> float:
+        return self._metric_event_direction(pred, gt, ctx, towards=False)
+
+    def _metric_group_stick(self, pred: np.ndarray, _: Optional[np.ndarray], ctx: dict) -> float:
+        pred_group = ctx.get("pred_scenario", pred)
+        groups = ctx.get("groups") or []
+        if not groups:
+            return np.nan
+        T, N, _ = pred_group.shape
+        if N == 0:
+            return np.nan
+        thr = self.group_cohesion_threshold
+        group_scores: list[float] = []
+        for grp in groups:
+            members = [m for m in grp if 0 <= m < N]
+            if len(members) < 2:
+                continue
+            traj = pred_group[:, members, :]  # (T, G, 2)
+            per_timestep_max: list[float] = []
+            for t in range(T):
+                d = _pairwise_distances(traj[t], traj[t])
+                if d.size == 0:
+                    continue
+                iu = np.triu_indices(len(members), k=1)
+                per_timestep_max.append(float(np.max(d[iu])))
+            if not per_timestep_max:
+                continue
+            stick = np.asarray(per_timestep_max) <= thr
+            group_scores.append(float(np.mean(stick)))
+        if not group_scores:
+            return np.nan
+        return float(np.mean(group_scores))
+
+    def _metric_group_goal(self, pred: np.ndarray, _: Optional[np.ndarray], ctx: dict) -> float:
+        pred_goal = ctx.get("pred_scenario", pred)
+        groups = ctx.get("groups") or []
+        goals = ctx.get("goals")
+        if goals is None or not groups:
+            return np.nan
+        success_mask = self._goal_success_mask(pred_goal, goals)
+        if success_mask is None:
+            return np.nan
+        N = pred_goal.shape[1]
+        group_hits: list[bool] = []
+        for grp in groups:
+            members = [m for m in grp if 0 <= m < N]
+            if not members:
+                continue
+            group_hits.append(bool(np.all(success_mask[members])))
+        if not group_hits:
+            return np.nan
+        return float(np.mean(group_hits))
 
     def _hausdorff(self, a: np.ndarray, b: np.ndarray) -> float:
         """Symmetric Hausdorff distance between two point sets (M,2) and (K,2)."""
@@ -220,11 +351,60 @@ class TrajectoryEvaluator:
         "Kinem": _metric_kinem,
         "CollisionRate": _metric_collision_rate,
         "GoalRate": _metric_goal_rate,
+        "goal_achieve_as_long_as_pass_by": _metric_goal_pass_by,
         "VD": _metric_vd,
         "DDS": _metric_dds,
         # "Hausdorff": _metric_hausdorff,
         "SocialDistanceViolations": _metric_social_distance_violations,
+        "towards_event_achieve_rate": _metric_towards_event,
+        "away_event_achieve_rate": _metric_away_event,
+        "group_stick_together": _metric_group_stick,
+        "group_goal_achievement": _metric_group_goal,
     }
+
+    def _compute_distance_scale(
+        self, pred: np.ndarray, gt: Optional[np.ndarray], bounds: Optional[Tuple[float, float, float, float]]
+    ) -> float:
+        if bounds is not None:
+            x_min, x_max, y_min, y_max = bounds
+        else:
+            pts = [pred.reshape(-1, 2)]
+            if gt is not None:
+                pts.append(gt.reshape(-1, 2))
+            all_pos = np.concatenate(pts, axis=0)
+            x_min, y_min = np.nanmin(all_pos, axis=0)
+            x_max, y_max = np.nanmax(all_pos, axis=0)
+        diag = np.linalg.norm([x_max - x_min, y_max - y_min])
+        if not np.isfinite(diag) or diag <= 0:
+            diag = np.linalg.norm(pred[-1] - pred[0], axis=1).max(initial=1.0)
+        return float(max(diag, 1e-6))
+
+    def _scale_metric_value(self, name: str, value: float, ctx: dict) -> float:
+        if not np.isfinite(value):
+            return value
+        distance_scale = ctx["distance_scale"]
+        if name in {"ADE", "FDE", "EMD"}:
+            return float(np.clip(value / distance_scale, 0.0, 1.0))
+        if name == "Kinem":
+            speed_scale = distance_scale / self.dt
+            return float(np.clip(value / speed_scale, 0.0, 1.0))
+        if name == "VD":
+            ang_scale = (distance_scale / self.dt) ** 2
+            return float(np.clip(value / ang_scale, 0.0, 1.0))
+        if name in {
+            "GoalRate",
+            "goal_achieve_as_long_as_pass_by",
+            "CollisionRate",
+            "DDS",
+            "SocialDistanceViolations",
+            "towards_event_achieve_rate",
+            "away_event_achieve_rate",
+            "group_stick_together",
+            "group_goal_achievement",
+        }:
+            return float(np.clip(value, 0.0, 1.0))
+        # Fallback normalization keeps the metric bounded without changing ordering.
+        return float(np.clip(value / (value + distance_scale), 0.0, 1.0))
 
     def evaluate(
         self,
@@ -232,6 +412,9 @@ class TrajectoryEvaluator:
         gt: Optional[np.ndarray] = None,
         goals: Optional[np.ndarray] = None,
         bounds: Optional[Tuple[float, float, float, float]] = None,
+        towards_event: Optional[str | bool] = None,
+        groups: Optional[Iterable[Iterable[int]]] = None,
+        event_center: Optional[np.ndarray] = None,
         *,
         match_agents: bool = True,
     ) -> Dict[str, float]:
@@ -242,11 +425,38 @@ class TrajectoryEvaluator:
         if gt is not None and pred.shape[0] != gt.shape[0]:
             raise ValueError("pred and gt must have the same number of timesteps (T).")
 
+        pred_for_goals = pred
         perm: Optional[np.ndarray] = None
         if match_agents and gt is not None:
             pred, gt, perm = self._align_by_hungarian_final(pred, gt)
 
-        ctx = {"goals": goals, "bounds": bounds, "perm": perm}
+        distance_scale = self._compute_distance_scale(pred, gt, bounds)
+
+        def _normalize_towards_event(value: object) -> str | bool | None:
+            if value is None:
+                return None
+            if isinstance(value, bool):
+                return value
+            if isinstance(value, str):
+                lowered = value.strip().lower()
+                if lowered in {"true", "towards", "toward"}:
+                    return True
+                if lowered in {"false", "away"}:
+                    return False
+                if lowered == "random":
+                    return "random"
+            return None
+
+        ctx = {
+            "goals": goals,
+            "bounds": bounds,
+            "perm": perm,
+            "event_center": event_center,
+            "towards_event": _normalize_towards_event(towards_event),
+            "groups": [list(map(int, g)) for g in groups] if groups is not None else None,
+            "distance_scale": distance_scale,
+            "pred_scenario": pred_for_goals,
+        }
         out: Dict[str, float] = {}
 
         requires_gt = {
@@ -256,10 +466,15 @@ class TrajectoryEvaluator:
             "Kinem": True,
             "CollisionRate": False,
             "GoalRate": False,  # depends on goals
+            "goal_achieve_as_long_as_pass_by": False,
             "VD": True,
             "DDS": True,
             "Hausdorff": False,  # can run pred-only (pairwise) or pred-vs-gt
             "SocialDistanceViolations": False,
+            "towards_event_achieve_rate": False,
+            "away_event_achieve_rate": False,
+            "group_stick_together": False,
+            "group_goal_achievement": False,
         }
 
         for name in self.metrics:
@@ -269,7 +484,8 @@ class TrajectoryEvaluator:
             if requires_gt.get(name, False) and gt is None:
                 out[name] = np.nan
                 continue
-            out[name] = func(self, pred, gt, ctx)
+            raw_value = func(self, pred, gt, ctx)
+            out[name] = self._scale_metric_value(name, raw_value, ctx)
 
         self.result = out
         return out

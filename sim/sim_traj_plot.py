@@ -45,7 +45,12 @@ def _resolve_obstacle(scene: dict, obstacle_path: Optional[Path]) -> Path:
         raise FileNotFoundError("Obstacle map not provided and missing in scene assets.")
     obstacle = Path(obstacle_str)
     if not obstacle.exists():
-        raise FileNotFoundError(f"Obstacle map not found: {obstacle}")
+        # Common mismatch: file stored as *_anchored.npz but path omits suffix.
+        alt = obstacle.with_name(f"{obstacle.stem}_anchored{obstacle.suffix}")
+        if alt.exists():
+            obstacle = alt
+        else:
+            raise FileNotFoundError(f"Obstacle map not found: {obstacle}")
     return obstacle
 
 

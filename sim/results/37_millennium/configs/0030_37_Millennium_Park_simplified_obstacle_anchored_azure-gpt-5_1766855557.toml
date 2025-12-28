@@ -1,0 +1,54 @@
+title = "Pop-up Poetry Circle: Gentle milling then dispersal"
+
+[scene]
+enable_group = true
+agent_radius = 0.35
+step_width = 0.4
+max_speed_multiplier = 1.1
+tau = 0.7
+resolution = 1
+
+[goal_attractive_force]
+factor = 0.9
+
+[ped_repulsive_force]
+factor = 1.2
+v0 = 1.8
+sigma = 0.4
+fov_phi = 120.0
+fov_factor = 0.4
+
+[space_repulsive_force]
+factor = 0.6
+u0 = 8.0
+r = 0.2
+
+[group_coherence_force]
+factor = 2.5
+
+[group_repulsive_force]
+factor = 1.2
+threshold = 0.7
+
+[group_gaze_force]
+factor = 6.0
+fov_phi = 120.0
+
+[desired_force]
+factor = 1.0
+relaxation_time = 0.8
+goal_threshold = 1.8
+
+[social_force]
+factor = 4.5
+lambda_importance = 2.0
+gamma = 0.35
+n = 2
+n_prime = 3
+
+[obstacle_force]
+factor = 6.0
+sigma = 0.2
+threshold = 1.5
+
+[along_wall_force]

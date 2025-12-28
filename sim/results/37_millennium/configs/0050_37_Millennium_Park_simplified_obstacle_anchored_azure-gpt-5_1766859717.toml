@@ -1,0 +1,136 @@
+title = "Human-rights March: West Plaza -> Promenade Loop -> South Corners"
+
+[scene]
+enable_group = true
+agent_radius = 0.35
+step_width = 0.4
+max_speed_multiplier = 1.2
+tau = 0.6
+resolution = 1
+bounds = [0.0, 0.0, 100.0, 60.0]
+
+[crowd]
+size = 200
+desired_speed_mean = 1.2
+desired_speed_std = 0.15
+
+[crowd.spawn]
+# west plaza spawn region (within west promenade corridor)
+region = [2.0, 20.0, 8.0, 40.0]
+duration = 120.0
+# general initial heading northward along the west side of the loop
+direction_hint = [0.0, 1.0]
+
+# Two route splits: all agents loop the promenade once, then half conclude at SW, half at SE corners
+[[routes]]
+name = "loop_to_SW"
+waypoints = [
+  [7.5, 20.0],   # enter west corridor from spawn band
+  [7.5, 55.0],   # north along west corridor to near NW
+  [50.0, 55.0],  # east along north corridor
+  [92.5, 40.0],  # down east corridor
+  [92.5, 15.0],  # continue south along east corridor
+  [7.0, 5.0]     # conclude at southwest corner of south corridor
+]
+fraction = 0.5
+
+[[routes]]
+name = "loop_to_SE"
+waypoints = [
+  [7.5, 20.0],
+  [7.5, 55.0],
+  [50.0, 55.0],
+  [92.5, 40.0],
+  [92.5, 15.0],
+  [95.0, 5.0]    # conclude at southeast corner of south corridor
+]
+fraction = 0.5
+
+# Promenade ring as a corridor between outer boundary and inner island
+# Outer boundary walls (site perimeter)
+[[obstacles]]
+p1 = [0.0, 0.0]
+p2 = [100.0, 0.0]
+type = "wall"
+
+[[obstacles]]
+p1 = [100.0, 0.0]
+p2 = [100.0, 60.0]
+type = "wall"
+
+[[obstacles]]
+p1 = [100.0, 60.0]
+p2 = [0.0, 60.0]
+type = "wall"
+
+[[obstacles]]
+p1 = [0.0, 60.0]
+p2 = [0.0, 0.0]
+type = "wall"
+
+# Inner island (plaza/greens) creating the promenade loop around it
+[[obstacles]]
+p1 = [15.0, 10.0]
+p2 = [85.0, 10.0]
+type = "wall"
+
+[[obstacles]]
+p1 = [85.0, 10.0]
+p2 = [85.0, 50.0]
+type = "wall"
+
+[[obstacles]]
+p1 = [85.0, 50.0]
+p2 = [15.0, 50.0]
+type = "wall"
+
+[[obstacles]]
+p1 = [15.0, 50.0]
+p2 = [15.0, 10.0]
+type = "wall"
+
+[goal_attractive_force]
+factor = 1.0
+
+[ped_repulsive_force]
+factor = 1.8
+v0 = 2.0
+sigma = 0.4
+fov_phi = 160.0
+fov_factor = 0.6
+
+[space_repulsive_force]
+factor = 1.0
+u0 = 10.0
+r = 0.2
+
+[group_coherence_force]
+factor = 4.0
+
+[group_repulsive_force]
+factor = 0.8
+threshold = 0.4
+
+[group_gaze_force]
+factor = 3.0
+fov_phi = 90.0
+
+[desired_force]
+factor = 1.0
+relaxation_time = 0.6
+goal_threshold = 1.0
+
+[social_force]
+factor = 5.0
+lambda_importance = 2.0
+gamma = 0.35
+n = 2
+n_prime = 3
+
+[obstacle_force]
+factor = 15.0
+sigma = 0.2
+threshold = 2.0
+
+[along_wall_force]
+factor = 1.5

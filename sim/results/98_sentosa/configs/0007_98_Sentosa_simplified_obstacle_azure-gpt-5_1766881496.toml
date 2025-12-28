@@ -1,0 +1,57 @@
+title = "Team-Building Cohort to Central Station"
+
+[scene]
+enable_group = true
+agent_radius = 0.35
+step_width = 0.4
+max_speed_multiplier = 1.2
+tau = 0.5
+resolution = 1
+
+[goal_attractive_force]
+factor = 1.3
+
+[ped_repulsive_force]
+factor = 1.2
+v0 = 1.6
+sigma = 0.35
+fov_phi = 110.0
+fov_factor = 0.4
+
+[space_repulsive_force]
+factor = 0.8
+u0 = 8
+r = 0.2
+
+[group_coherence_force]
+factor = 5.0
+
+[group_repulsive_force]
+factor = 0.6
+threshold = 0.45
+
+[group_gaze_force]
+factor = 4.5
+fov_phi = 100.0
+
+[desired_force]
+factor = 1.0
+relaxation_time = 0.6
+goal_threshold = 0.5
+
+[social_force]
+factor = 5.0
+lambda_importance = 2.0
+gamma = 0.35
+n = 2
+n_prime = 3
+
+[obstacle_force]
+factor = 6.0
+sigma = 0.2
+threshold = 3.0
+
+[along_wall_force]
+
+[explanation]
+text = "A cohesive corporate team moving as one toward a central station is modeled with strong group forces: high group_coherence and group_gaze keep the cohort tight and aligned, while lower group_repulsive factor and threshold allow closer spacing typical of coordinated movement. Goal attraction is increased to pull the whole group decisively to the central activity point. Pedestrian repulsion is slightly reduced and forward-focused (moderate FOV) so teammates tolerate closer proximity ahead. Desired dynamics are moderate and smooth (max_speed_multiplier 1.2, relaxation_time 0.6) to reflect walking as a unit. The plaza is open, so obstacle and space repulsion are moderate/low, with standard obstacle sensitivity retained for any incidental structures. Resolution is set to 1 meter per unit to match the scene scale, and goal_threshold is larger to allow stopping within the activity station area."

@@ -1,0 +1,58 @@
+title = "Morning Cross-Traffic: Boardwalk to Terraces"
+
+[scene]
+enable_group = true
+agent_radius = 0.34
+step_width = 0.3
+max_speed_multiplier = 1.5
+tau = 0.45
+resolution = 1
+
+[goal_attractive_force]
+factor = 1.2
+
+[ped_repulsive_force]
+factor = 2.0
+v0 = 2.5
+sigma = 0.35
+fov_phi = 120.0
+fov_factor = 0.6
+
+[space_repulsive_force]
+factor = 1.0
+u0 = 8.0
+r = 0.25
+
+[group_coherence_force]
+factor = 1.5
+
+[group_repulsive_force]
+factor = 1.0
+threshold = 0.6
+
+[group_gaze_force]
+factor = 2.5
+fov_phi = 100.0
+
+[desired_force]
+factor = 1.0
+relaxation_time = 0.4
+goal_threshold = 0.25
+
+[social_force]
+factor = 5.5
+lambda_importance = 2.2
+gamma = 0.36
+n = 2
+n_prime = 3
+
+[obstacle_force]
+factor = 9.0
+sigma = 0.3
+threshold = 3.0
+
+[along_wall_force]
+factor = 0.0
+
+[explanation]
+# Chosen for mixed-speed cross-traffic between the northern boardwalk and southern seating terraces. Joggers require quick adaptation and higher top speeds, so step_width is reduced (0.3 s), relaxation_time is short (0.4 s), and max_speed_multiplier is raised (1.5). Cross-traffic with intersecting headings needs broader anticipation, so pedestrian FOV is widened to 120° and ped_repulsive_force is strengthened (factor 2.0, v0 2.5, sigma 0.35) to resolve frequent conflicts without oscillations. Agent radius 0.34 m reflects light-clothing adults in a plaza. Moderate group forces (coherence 1.5, gaze 2.5) allow small staff pairs to stay together while joggers remain mostly independent; group_repulsive threshold 0.6 prevents groups from clogging crossings. Obstacle force is elevated (9.0) with 3 m threshold to keep flows off planter/terrace edges while the open plaza remains attractive. Social force anisotropy (lambda 2.2, gamma 0.36) supports lane formation and smoother head-on avoidance. Resolution is set to 1 unit per meter to match scene scale, and along_wall influence is disabled for open-plaza cutting across paths.
