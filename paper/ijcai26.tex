@@ -398,7 +398,7 @@ the text.
 
 \subsection{Dataset Creation}
 To get a dataset that could demonstrate crowd in public area, we scripted around 100 world famous public places maps including tourists-heavy area, stadiums, university campus and public transportation hub. We then implemented an image to obstacle data processing pipeline using the colormap provided by Google Map official API as well as segmentation model and Polygon approximity algorithm. 
-
+The script real world map size is fixed with a width around 301.7 m, height around 282.8 m.
 % figure 1: real world map to obstacle map
 \begin{figure}[t]
   \centering
@@ -406,6 +406,10 @@ To get a dataset that could demonstrate crowd in public area, we scripted around
   \caption{Real world map to obstacle map.}
   \label{fig:real-world-obstacle}
 \end{figure}
+
+To generate the contextual description of crowd scenarios, we categorize the crowd into different types based on Berlonghi (TODO)'s crowd 
+psychological theory, including casual gathering, spectator crowd, expressive crowd, and aggressive crowd. In total we have 11 categories of different crowd.
+We then designed a prompt template to let GPT-5 to generate high level and diverse natural language descriptions for each type of crowd scenario, 
 
 
 \section{Evaluation}

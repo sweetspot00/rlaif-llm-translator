@@ -53,6 +53,7 @@ class TrajectoryEvaluator:
     density_bins: int = 20
     dt: float = 0.4 # step_width in seconds, align to pysocialforce default
     group_cohesion_threshold: float = 5
+    group_stick_min_percentage: float = 0.5
     metrics: Iterable[str] = field(
         default_factory=lambda: (
             "ADE",
@@ -170,6 +171,12 @@ class TrajectoryEvaluator:
         success = self._goal_success_mask(pred_goal, ctx.get("goals"))
         if success is None:
             return np.nan
+        groups = ctx.get("groups") or []
+        if groups:
+            N = pred_goal.shape[1]
+            members = sorted({m for grp in groups for m in grp if 0 <= m < N})
+            if members:
+                return float(np.mean(success[members]))
         return float(np.mean(success))
 
     def _goal_success_mask(self, pred: np.ndarray, goals: Optional[np.ndarray]) -> Optional[np.ndarray]:
@@ -276,8 +283,9 @@ class TrajectoryEvaluator:
         T, N, _ = pred_group.shape
         if N == 0:
             return np.nan
-        thr = self.group_cohesion_threshold
-        group_scores: list[float] = []
+        threshold = self.group_stick_min_percentage
+        max_pair_distance = self.group_cohesion_threshold
+        group_scores: list[bool] = []
         for grp in groups:
             members = [m for m in grp if 0 <= m < N]
             if len(members) < 2:
@@ -292,8 +300,8 @@ class TrajectoryEvaluator:
                 per_timestep_max.append(float(np.max(d[iu])))
             if not per_timestep_max:
                 continue
-            stick = np.asarray(per_timestep_max) <= thr
-            group_scores.append(float(np.mean(stick)))
+            stick = np.asarray(per_timestep_max) < max_pair_distance
+            group_scores.append(bool(np.mean(stick) >= threshold))
         if not group_scores:
             return np.nan
         return float(np.mean(group_scores))

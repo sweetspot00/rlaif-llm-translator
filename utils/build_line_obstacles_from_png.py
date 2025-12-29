@@ -145,7 +145,7 @@ def process(
     merged_segments_px = merge_collinear(segments_px)
 
     if homography_path is None:
-        # Try exact match helper first, then fuzzy contains match.
+        # Try exact match helper first, then prefix, then fuzzy contains match.
         if homographies_dir is None:
             homographies_dir = obstacle_png.parent.parent / "homographies"
         h_exact = find_homography_exact(obstacle_png, homographies_dir)
@@ -154,9 +154,13 @@ def process(
         else:
             stem = obstacle_png.stem.lower()
             base_stem = stem.replace("_simplified_obstacle", "").replace("_obstacle", "")
+            prefix = obstacle_png.name.split("_", 1)[0].lower()
             candidates = []
             for h in homographies_dir.glob("*.txt"):
                 hstem = h.stem.lower()
+                if hstem.startswith(prefix + "_") or hstem == prefix:
+                    candidates.append(h)
+                    continue
                 if stem in hstem or hstem in stem or base_stem in hstem or hstem in base_stem:
                     candidates.append(h)
             homography_path = sorted(candidates)[0] if candidates else None
@@ -187,7 +191,13 @@ def process(
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Build PySocialForce line obstacles from a simplified obstacle PNG.")
-    parser.add_argument("--obstacle-png", type=Path, required=True, help="Path to binary obstacle PNG.")
+    target = parser.add_mutually_exclusive_group(required=True)
+    target.add_argument("--obstacle-png", type=Path, help="Path to a single binary obstacle PNG.")
+    target.add_argument(
+        "--obstacle-dir",
+        type=Path,
+        help="Directory of obstacle PNGs to batch process. Defaults to downloads/maps/simplified_obstacles.",
+    )
     parser.add_argument(
         "--homography",
         type=Path,
@@ -197,8 +207,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--homographies-dir",
         type=Path,
-        default=Path("downloads/google_maps/homographies"),
-        help="Directory to search for homography txt when --homography is not provided.",
+        default=None,
+        help="Directory to search for homography txt when --homography is not provided. Defaults to a sibling 'homographies' folder next to the obstacle PNG.",
     )
     parser.add_argument(
         "--out-npz",
@@ -213,31 +223,86 @@ def parse_args() -> argparse.Namespace:
         help="Path to write visualization PNG. Defaults to <stem>_anchored.png beside out-npz.",
     )
     parser.add_argument("--threshold", type=int, default=127, help="Pixels <= threshold treated as obstacle.")
+    parser.add_argument(
+        "--skip-existing-prefixes",
+        action="store_true",
+        help="When using --obstacle-dir, skip PNGs whose numeric prefix already has an NPZ in the output directory.",
+    )
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
-    stem = args.obstacle_png.stem
     default_npz_dir = Path("preprocess/pysfm_obstacles_meter_close_shape")
     default_plot_dir = default_npz_dir / "line_obstacle_img"
 
-    base_out = args.out_npz if args.out_npz else default_npz_dir / f"{stem}_anchored.npz"
-    out_npz = base_out
-    out_plot = args.out_plot if args.out_plot else default_plot_dir / f"{stem}_anchored.png"
+    if args.obstacle_dir:
+        obstacle_dir = args.obstacle_dir or Path("downloads/maps/simplified_obstacles")
+        pngs = sorted(obstacle_dir.glob("*.png"))
+        if not pngs:
+            raise FileNotFoundError(f"No PNGs found in {obstacle_dir}")
+        if args.out_npz or args.out_plot:
+            raise ValueError("--out-npz/--out-plot cannot be used with --obstacle-dir; outputs are derived per file.")
 
-    out_npz.parent.mkdir(parents=True, exist_ok=True)
-    out_plot.parent.mkdir(parents=True, exist_ok=True)
+        existing_prefixes = {
+            p.name.split("_", 1)[0] for p in default_npz_dir.glob("*.npz")
+        } if args.skip_existing_prefixes else set()
 
-    obstacles_m = process(
-        obstacle_png=args.obstacle_png,
-        homography_path=args.homography,
-        homographies_dir=args.homographies_dir,
-        out_npz=out_npz,
-        out_plot=out_plot,
-        threshold=args.threshold,
-    )
-    print(f"Saved {out_npz} with {obstacles_m.shape[0]} segments; plot at {out_plot}")
+        successes = 0
+        skipped = 0
+        failures: list[tuple[str, Exception]] = []
+        for png in pngs:
+            prefix = png.name.split("_", 1)[0]
+            if prefix in existing_prefixes:
+                print(f"Skipping {png.name} (prefix {prefix} already exists in {default_npz_dir})")
+                skipped += 1
+                continue
+
+            stem = png.stem
+            out_npz = default_npz_dir / f"{stem}_anchored.npz"
+            out_plot = default_plot_dir / f"{stem}_anchored.png"
+            out_npz.parent.mkdir(parents=True, exist_ok=True)
+            out_plot.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                obstacles_m = process(
+                    obstacle_png=png,
+                    homography_path=args.homography,
+                    homographies_dir=args.homographies_dir,
+                    out_npz=out_npz,
+                    out_plot=out_plot,
+                    threshold=args.threshold,
+                )
+                successes += 1
+                print(f"Saved {out_npz} with {obstacles_m.shape[0]} segments; plot at {out_plot}")
+            except Exception as exc:  # pylint: disable=broad-except
+                failures.append((png.name, exc))
+                print(f"Failed {png.name}: {exc}")
+
+        print(
+            f"Done. {successes} saved, {skipped} skipped"
+            + (f", {len(failures)} failed" if failures else "")
+        )
+        if failures:
+            for name, exc in failures:
+                print(f" - {name}: {exc}")
+    else:
+        stem = args.obstacle_png.stem
+        base_out = args.out_npz if args.out_npz else default_npz_dir / f"{stem}_anchored.npz"
+        out_npz = base_out
+        out_plot = args.out_plot if args.out_plot else default_plot_dir / f"{stem}_anchored.png"
+
+        out_npz.parent.mkdir(parents=True, exist_ok=True)
+        out_plot.parent.mkdir(parents=True, exist_ok=True)
+
+        obstacles_m = process(
+            obstacle_png=args.obstacle_png,
+            homography_path=args.homography,
+            homographies_dir=args.homographies_dir,
+            out_npz=out_npz,
+            out_plot=out_plot,
+            threshold=args.threshold,
+        )
+        print(f"Saved {out_npz} with {obstacles_m.shape[0]} segments; plot at {out_plot}")
 
 
 if __name__ == "__main__":

@@ -1,14 +1,14 @@
 # Fdb version 4
-["bibtex ijcai26"] 1766880653.9407 "ijcai26.aux" "ijcai26.bbl" "ijcai26" 1766880654.64109 0
-  "./ijcai26.bib" 1766849337.44454 2536 5979fc10476b24e6515d58cf15d51f38 ""
-  "./named.bst" 1766877092.56372 22941 5de9ab1d83bc8b693f08ecd1b7942647 ""
-  "ijcai26.aux" 1766880654.44028 13004 430bca5eb0ba66a1400b8d14e6fa2ec4 "pdflatex"
+["bibtex ijcai26"] 1766923325.40336 "ijcai26.aux" "ijcai26.bbl" "ijcai26" 1766923326.16889 0
+  "./ijcai26.bib" 1766882008.09075 2536 5979fc10476b24e6515d58cf15d51f38 ""
+  "./named.bst" 1766882008.09447 22941 5de9ab1d83bc8b693f08ecd1b7942647 ""
+  "ijcai26.aux" 1766923325.95951 13134 ac034c621350474e17fb94fbd8d7f3ca "pdflatex"
   (generated)
   "ijcai26.bbl"
   "ijcai26.blg"
   (rewritten before read)
-["pdflatex"] 1766880654.02014 "/Users/wanchunni/Documents/code/rlaif-llm-translator/paper/ijcai26.tex" "ijcai26.pdf" "ijcai26" 1766880654.64123 0
-  "/Users/wanchunni/Documents/code/rlaif-llm-translator/paper/ijcai26.tex" 1766880652.71774 30002 69850aebfb7260377450357b1ecd544e ""
+["pdflatex"] 1766923325.47386 "/Users/wanchunni/Documents/code/rlaif-llm-translator/paper/ijcai26.tex" "ijcai26.pdf" "ijcai26" 1766923326.16901 0
+  "/Users/wanchunni/Documents/code/rlaif-llm-translator/paper/ijcai26.tex" 1766923324.45509 30538 00740dc306a5e4a31650b8bcd9d7fc6b ""
   "/usr/local/texlive/2025/texmf-dist/fonts/enc/dvips/base/8r.enc" 1165713224 4850 80dc9bab7f31fb78a000ccfed0e27cab ""
   "/usr/local/texlive/2025/texmf-dist/fonts/map/fontname/texfonts.map" 1577235249 3524 cb3e574dea2d1052e39280babc910dc8 ""
   "/usr/local/texlive/2025/texmf-dist/fonts/tfm/adobe/courier/pcrr7t.tfm" 1136768653 960 379cc0019370a9e0208a0a3f949f847a ""
@@ -135,12 +135,12 @@
   "/usr/local/texlive/2025/texmf-var/fonts/map/pdftex/updmap/pdftex.map" 1766857997 5467155 19efa205003f9ecad95fbbaa6ff24da1 ""
   "/usr/local/texlive/2025/texmf-var/web2c/pdftex/pdflatex.fmt" 1766857976 3345746 020da7875731c35df25824724b920ff9 ""
   "/usr/local/texlive/2025/texmf.cnf" 1741450484 577 418a7058ec8e006d8704f60ecd22c938 ""
-  "figures/real_world_to_obstacle.jpg" 1766880180.16263 1390262 72874a8ec040f36dd937f16057ba01b6 ""
-  "ijcai26.aux" 1766880654.44028 13004 430bca5eb0ba66a1400b8d14e6fa2ec4 "pdflatex"
-  "ijcai26.bbl" 1766880654.01834 2275 7f5e1668bbf024c6c0a4023231d0b344 "bibtex ijcai26"
-  "ijcai26.out" 1766880654.44102 5380 0b3fddf9d06ac44af1e43368493e9f50 "pdflatex"
-  "ijcai26.sty" 1766849301.18301 13104 84bec3e8c5b2704555e1798f5ec868f8 ""
-  "ijcai26.tex" 1766880652.71774 30002 69850aebfb7260377450357b1ecd544e ""
+  "figures/real_world_to_obstacle.jpg" 1766882008.09049 1390262 72874a8ec040f36dd937f16057ba01b6 ""
+  "ijcai26.aux" 1766923325.95951 13134 ac034c621350474e17fb94fbd8d7f3ca "pdflatex"
+  "ijcai26.bbl" 1766923325.4718 2275 7f5e1668bbf024c6c0a4023231d0b344 "bibtex ijcai26"
+  "ijcai26.out" 1766923325.96025 5380 0b3fddf9d06ac44af1e43368493e9f50 "pdflatex"
+  "ijcai26.sty" 1766882008.09414 13104 84bec3e8c5b2704555e1798f5ec868f8 ""
+  "ijcai26.tex" 1766923324.45509 30538 00740dc306a5e4a31650b8bcd9d7fc6b ""
   (generated)
   "ijcai26.aux"
   "ijcai26.log"
