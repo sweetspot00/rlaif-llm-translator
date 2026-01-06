@@ -607,10 +607,15 @@ class TrajectoryEvaluator:
             bins=bins,
             range=[[x_min, x_max], [y_min, y_max]],
         )
+        # Convert occupancy counts to average agent density per square meter
+        bin_width_x = (x_max - x_min) / bins
+        bin_width_y = (y_max - y_min) / bins
+        bin_area = bin_width_x * bin_width_y
+        density = hist / (traj.shape[0] * bin_area)
 
         fig, ax = plt.subplots()
         im = ax.imshow(
-            hist.T,
+            density.T,
             origin="lower",
             extent=[x_min, x_max, y_min, y_max],
             aspect="auto",
@@ -618,8 +623,8 @@ class TrajectoryEvaluator:
         )
         ax.set_xlabel("x (m)")
         ax.set_ylabel("y (m)")
-        ax.set_title("Density map (occupancy)")
-        fig.colorbar(im, ax=ax, label="count")
+        ax.set_title("Density map (agents per m²)")
+        fig.colorbar(im, ax=ax, label="ped/m²")
 
         if save_path:
             fig.savefig(save_path, dpi=200, bbox_inches="tight")

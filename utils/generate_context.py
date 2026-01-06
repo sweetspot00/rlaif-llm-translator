@@ -205,6 +205,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--model", type=str, default="azure/gpt-5", help="Model name to request from the proxy.")
     parser.add_argument("--api-key", type=str, default=os.getenv("OPENAI_API_KEY"), help="API key for the LiteLLM proxy.")
     parser.add_argument("--per-category", type=int, default=100, help="Number of scenarios per category per image.")
+    parser.add_argument(
+        "--max-per-request",
+        type=int,
+        default=10,
+        help="Max scenarios per category to request in a single LLM call (batches requests when per-category is larger).",
+    )
     parser.add_argument("--max-retries", type=int, default=3, help="Max retries per LLM request.")
     parser.add_argument("--retry-wait", type=float, default=5.0, help="Base seconds to wait between retries (multiplies by attempt).")
     parser.add_argument("--dry-run", action="store_true", help="Print prompts only; do not call the API.")
@@ -236,6 +242,52 @@ def load_processed_images(path: Path) -> Set[str]:
     return processed
 
 
+def count_records(path: Path) -> int:
+    """Count valid JSONL records in the given file."""
+    if not path.exists():
+        return 0
+    count = 0
+    with path.open("r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                json.loads(line)
+                count += 1
+            except json.JSONDecodeError:
+                continue
+    return count
+
+
+def output_path_for_image(base_output: Path, image_path: Path) -> Path:
+    """
+    Build an output JSONL path for a given image.
+
+    Example:
+        downloads/.../00_Zurich_HB_simplified_obstacle.png -> context_00_zurich.jsonl
+    """
+    # If a file path is passed, use its parent as the output directory.
+    out_dir = base_output.parent if base_output.suffix else base_output
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    stem = image_path.stem
+    # Drop common suffixes.
+    stem = re.sub(r"_simplified(_obstacle)?$", "", stem, flags=re.IGNORECASE)
+    stem = re.sub(r"_obstacle$", "", stem, flags=re.IGNORECASE)
+    tokens = [t for t in stem.split("_") if t]
+    tokens_lower = [t.lower() for t in tokens]
+
+    if len(tokens_lower) >= 2:
+        name_core = f"{tokens_lower[0]}_{tokens_lower[1]}"
+    elif tokens_lower:
+        name_core = tokens_lower[0]
+    else:
+        name_core = "context"
+
+    return out_dir / f"context_{name_core}.jsonl"
+
+
 def main() -> None:
     args = parse_args()
     if not args.api_key:
@@ -246,12 +298,10 @@ def main() -> None:
         base_url="https://aikey-gateway.ivia.ch",
     )
 
-    out_path: Path = args.output
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-
-    processed_images = load_processed_images(out_path)
+    base_output: Path = args.output
 
     per_category = 5 if args.test else args.per_category
+    max_per_request = max(1, min(args.max_per_request, per_category))
     max_images = 5 if args.test else None
 
     image_list = list(iter_images(args.images))
@@ -262,43 +312,60 @@ def main() -> None:
 
     for image_path in iterator:
         image_name = image_path.name
-        if image_name in processed_images:
+        out_path = output_path_for_image(base_output, image_path)
+        processed_images = load_processed_images(out_path)
+        if tqdm and processed_images:
+            iterator.set_postfix_str(f"append {len(processed_images)} existing")
+        existing_records = count_records(out_path)
+        target_records = per_category * 11  # 11 categories
+        if existing_records >= target_records:
             if tqdm:
-                iterator.set_postfix_str(f"skip {image_name}")
+                iterator.set_postfix_str(f"skip complete ({existing_records}/{target_records})")
+            else:
+                print(f"Skip {image_name}: {existing_records} records already meet target {target_records}.")
             continue
         location_name = slug_to_readable(image_path.stem)
         image_b64 = load_image_b64(image_path)
-        user_prompt = build_user_prompt(image_name, location_name, per_category, image_b64)
+        remaining = per_category
+        batch_idx = 0
 
-        if args.dry_run:
-            print(f"--- DRY RUN for {image_name} ---")
-            print(user_prompt)
-            continue
+        while remaining > 0:
+            batch_idx += 1
+            batch_size = min(remaining, max_per_request)
+            user_prompt = build_user_prompt(image_name, location_name, batch_size, image_b64)
 
-        print(f"Requesting scenarios for {image_name} ...")
-        content = request_scenarios(
-            client=client,
-            image_name=image_name,
-            location_name=location_name,
-            per_category=per_category,
-            image_b64=image_b64,
-            model=args.model,
-            max_retries=args.max_retries,
-            retry_wait=args.retry_wait,
-        )
+            if args.dry_run:
+                print(f"--- DRY RUN for {image_name} (batch {batch_idx}, {batch_size}/category) ---")
+                print(user_prompt)
+                remaining -= batch_size
+                continue
 
-        with out_path.open("a", encoding="utf-8") as f:
-            for line in content.splitlines():
-                if not line.strip():
-                    continue
-                try:
-                    obj = json.loads(line)
-                    if "image" not in obj:
-                        obj["image"] = image_name
-                    f.write(json.dumps(obj, ensure_ascii=False) + "\n")
-                except json.JSONDecodeError:
-                    # If the model returned non-JSONL lines, write them verbatim to inspect/fix later.
-                    f.write(line.rstrip("\n") + "\n")
+            print(f"Requesting scenarios for {image_name} (batch {batch_idx}, {batch_size} per category, remaining after: {remaining - batch_size}) ...")
+            content = request_scenarios(
+                client=client,
+                image_name=image_name,
+                location_name=location_name,
+                per_category=batch_size,
+                image_b64=image_b64,
+                model=args.model,
+                max_retries=args.max_retries,
+                retry_wait=args.retry_wait,
+            )
+
+            with out_path.open("a", encoding="utf-8") as f:
+                for line in content.splitlines():
+                    if not line.strip():
+                        continue
+                    try:
+                        obj = json.loads(line)
+                        if "image" not in obj:
+                            obj["image"] = image_name
+                        f.write(json.dumps(obj, ensure_ascii=False) + "\n")
+                    except json.JSONDecodeError:
+                        # If the model returned non-JSONL lines, write them verbatim to inspect/fix later.
+                        f.write(line.rstrip("\n") + "\n")
+
+            remaining -= batch_size
 
     if args.dry_run:
         print("Dry run complete. No API calls made.")

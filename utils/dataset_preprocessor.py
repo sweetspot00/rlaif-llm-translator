@@ -47,11 +47,14 @@ def _load_jsonl(path: Path) -> list[dict]:
     logger.info("Loading context JSONL from %s", path)
     rows: list[dict] = []
     with path.open("r", encoding="utf-8") as f:
-        for line in f:
+        for lineno, line in enumerate(f, start=1):
             line = line.strip()
             if not line:
                 continue
-            rows.append(json.loads(line))
+            try:
+                rows.append(json.loads(line))
+            except json.JSONDecodeError as e:
+                logger.warning("Skipping malformed JSON on line %d in %s: %s", lineno, path, e)
     return rows
 
 
@@ -330,15 +333,15 @@ class ScenePreprocessor:
             return np.vstack([px])
 
         if isinstance(goal_location, (list, tuple)):
+            # Allow list-of-points without dict wrapper.
+            arr_obj = np.asarray(goal_location, dtype=object)
+            if arr_obj.ndim == 2:
+                pts = np.asarray(goal_location, dtype=float)
+                snapped = [_nearest_walkable(mask, walkable_points, p) for p in pts]
+                return np.vstack(snapped)
             px = np.asarray(goal_location, dtype=float)
             px = _nearest_walkable(mask, walkable_points, px)
             return np.vstack([px])
-
-        # Allow list-of-points without dict wrapper.
-        if isinstance(goal_location, (list, tuple)) and np.asarray(goal_location, dtype=object).ndim == 2:
-            pts = np.asarray(goal_location, dtype=float)
-            snapped = [_nearest_walkable(mask, walkable_points, p) for p in pts]
-            return np.vstack(snapped)
 
         mode, count = _parse_goal_spec(str(goal_location))
         if mode == "random":
@@ -570,6 +573,33 @@ class ScenePreprocessor:
                 f.write(json.dumps(rec) + "\n")
         return outputs
 
+    def process_all_datasets(self, datasets_dir: Path = Path("datasets")) -> list[Path]:
+        """
+        Process every JSONL file inside `datasets_dir`, writing outputs to
+        preprocess/preprocessed_scene/<dataset_name>/ where dataset_name is the
+        context filename without the leading `context_` prefix.
+        """
+        datasets_dir = Path(datasets_dir)
+        jsonl_files = sorted(datasets_dir.glob("*.jsonl"))
+        if not jsonl_files:
+            logger.warning("No JSONL files found under %s", datasets_dir)
+            return []
+
+        original_context = self.context_path
+        original_output = self.output_dir
+        all_outputs: list[Path] = []
+        try:
+            for jsonl_file in jsonl_files:
+                dataset_name = jsonl_file.stem.replace("context_", "")
+                self.context_path = jsonl_file
+                self.output_dir = Path("preprocess/preprocessed_scene") / dataset_name
+                logger.info("Processing dataset %s -> %s", jsonl_file.name, self.output_dir)
+                all_outputs.extend(self.process_all())
+        finally:
+            self.context_path = original_context
+            self.output_dir = original_output
+        return all_outputs
+
     def process_one(self, name: Optional[str] = None, *, context_index: Optional[int] = None) -> Optional[Path]:
         """
         Preprocess a single scene identified by image filename/stem or by line number in context.jsonl.
@@ -602,4 +632,7 @@ if __name__ == "__main__":
     # Example usages:
     # preprocessor.process_one("00_Zurich_HB")
     # preprocessor.process_one(context_index=9)
-    preprocessor.process_all()
+    if len(sys.argv) > 1 and sys.argv[1] == "--all-datasets":
+        preprocessor.process_all_datasets()
+    else:
+        preprocessor.process_all()

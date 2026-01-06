@@ -560,36 +560,52 @@ class SimulationRunner:
     ) -> list[tuple[Path, Path, dict]]:
         """
         Run simulations for all preprocessed scenes in a directory using threading to parallelize work.
+
+        If `preprocessed_dir` contains subfolders (e.g., preprocess/preprocessed_scene/00_zurich_hb),
+        results are written under corresponding subfolders of `results_root`
+        (e.g., sim/results/00_zurich_hb/{configs,simulations,metrics}).
         """
-        files = sorted(p for p in preprocessed_dir.glob("*.json"))
+        preprocessed_dir = Path(preprocessed_dir)
+        files = sorted(p for p in preprocessed_dir.rglob("*.json"))
         if not files:
             raise FileNotFoundError(f"No preprocessed scenes found in {preprocessed_dir}")
 
         results: list[tuple[Path, Path, dict]] = []
 
-        def _worker(scene_path: Path):
-            # Fresh runner per thread to avoid shared mutable state.
-            runner = SimulationRunner(
-                results_root=self.results_root,
-                provider=self.provider,
-                base_url=self.base_url,
-                model=self.model,
-                api_key=self.api_key,
-                llm_client=None,
-                if_need_traj_plot=self.if_need_traj_plot,
-            )
-            return runner.run_scene(scene_path, steps=steps, model_name=model_name)
+        # Group files by dataset (first path component under preprocessed_dir)
+        grouped: dict[str, list[Path]] = {}
+        for p in files:
+            rel_parts = p.relative_to(preprocessed_dir).parts
+            dataset = rel_parts[0] if len(rel_parts) > 1 else preprocessed_dir.name
+            grouped.setdefault(dataset, []).append(p)
 
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            future_to_path = {executor.submit(_worker, p): p for p in files}
-            for future in tqdm(as_completed(future_to_path), total=len(files), desc="Scenes"):
-                path = future_to_path[future]
-                try:
-                    cfg, sim, metrics = future.result()
-                    results.append((cfg, sim, metrics))
-                    logger.info(f"Completed simulation for {path.name}")
-                except Exception as exc:  # noqa: BLE001
-                    logger.error(f"Failed simulation for {path.name}: {exc}")
+        for dataset, dataset_files in grouped.items():
+            dataset_root = self.results_root / dataset
+            logger.info("Processing dataset %s (%d scenes) -> %s", dataset, len(dataset_files), dataset_root)
+
+            def _worker(scene_path: Path):
+                # Fresh runner per thread to avoid shared mutable state.
+                runner = SimulationRunner(
+                    results_root=dataset_root,
+                    provider=self.provider,
+                    base_url=self.base_url,
+                    model=self.model,
+                    api_key=self.api_key,
+                    llm_client=None,
+                    if_need_traj_plot=self.if_need_traj_plot,
+                )
+                return runner.run_scene(scene_path, steps=steps, model_name=model_name)
+
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                future_to_path = {executor.submit(_worker, p): p for p in dataset_files}
+                for future in tqdm(as_completed(future_to_path), total=len(dataset_files), desc=f"Scenes ({dataset})"):
+                    path = future_to_path[future]
+                    try:
+                        cfg, sim, metrics = future.result()
+                        results.append((cfg, sim, metrics))
+                        logger.info(f"Completed simulation for {dataset}/{path.name}")
+                    except Exception as exc:  # noqa: BLE001
+                        logger.error(f"Failed simulation for {dataset}/{path.name}: {exc}")
 
         return results
 
